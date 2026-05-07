@@ -153,10 +153,9 @@ textarea:focus, input:focus { outline: none; border-color: var(--amber); }
 }
 .motion-browse {
   margin-top: 8px;
+  position: relative;
 }
-.motion-browse select {
-  -webkit-appearance: auto;
-  appearance: auto;
+.motion-browse-btn {
   background: var(--surface);
   color: var(--muted);
   border: 1px solid var(--border);
@@ -168,8 +167,34 @@ textarea:focus, input:focus { outline: none; border-color: var(--amber); }
   cursor: pointer;
   width: 100%;
   max-width: 320px;
+  text-align: left;
 }
-.motion-browse select:focus { outline: none; border-color: var(--amber); }
+.motion-browse-btn:hover { border-color: var(--amber); color: var(--text); }
+.motion-browse-panel {
+  margin-top: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.motion-browse-panel.hidden { display: none; }
+.motion-browse-cat {
+  font-family: var(--ui);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-transform: uppercase;
+  margin: 10px 0 6px;
+}
+.motion-browse-cat:first-child { margin-top: 0; }
+.motion-browse-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
 
 input[type=range] { width: 100%; accent-color: var(--amber); }
 

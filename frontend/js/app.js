@@ -211,7 +211,7 @@ const TTS_STORAGE = 'rhetoricarena.tts_mode';
 const TTS_SPEED_STORAGE = 'rhetoricarena.tts_speed';
 const SPEED_STEPS = [1, 1.25, 1.5, 1.75, 2];
 const tts = {
-  mode: localStorage.getItem(TTS_STORAGE) || 'server',  // 'server' | 'browser' | 'off'
+  mode: localStorage.getItem(TTS_STORAGE) || 'browser',  // 'server' | 'browser' | 'off'
   speed: parseFloat(localStorage.getItem(TTS_SPEED_STORAGE)) || 1,
   voices: [],
   voiceMap: {},
@@ -229,14 +229,33 @@ if (window.speechSynthesis) {
   speechSynthesis.addEventListener('voiceschanged', loadVoices);
 }
 
+function rankVoice(v) {
+  const n = v.name.toLowerCase();
+  // Prefer cloud/neural voices; avoid espeak/festival which can sound reverb-y.
+  if (n.includes('google')) return 3;
+  if (n.includes('microsoft') || n.includes('zira') || n.includes('david')) return 2;
+  if (n.includes('espeak') || n.includes('festival') || n.includes('mbrola')) return 0;
+  return 1;
+}
+
+let _debaterVoiceSlot = 0;
+
 function pickVoice(speakerId) {
   if (tts.voiceMap[speakerId]) return tts.voiceMap[speakerId];
   const en = tts.voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('en'));
   if (!en.length) return null;
-  // Prefer non-default, varied voices. Hash speaker id to index.
-  let h = 0;
-  for (const c of speakerId) h = (h * 31 + c.charCodeAt(0)) | 0;
-  const v = en[Math.abs(h) % en.length];
+  const sorted = [...en].sort((a, b) => rankVoice(b) - rankVoice(a));
+  let v;
+  if (speakerId === 'moderator') {
+    // Best available voice for the moderator.
+    v = sorted[0];
+  } else {
+    // Each debater/speaker gets the next slot in the pool sequentially so they
+    // never collide and no single speaker is stuck on a bad voice permanently.
+    const pool = sorted.length > 1 ? sorted.slice(1) : sorted;
+    v = pool[_debaterVoiceSlot % pool.length];
+    _debaterVoiceSlot++;
+  }
   tts.voiceMap[speakerId] = v;
   return v;
 }
@@ -271,7 +290,7 @@ function applyTTSMode() {
 }
 
 function cycleTTSMode() {
-  const modes = state.ttsAvailable ? ['server', 'browser', 'off'] : ['browser', 'off'];
+  const modes = state.ttsAvailable ? ['browser', 'server', 'off'] : ['browser', 'off'];
   const i = modes.indexOf(tts.mode);
   tts.mode = modes[(i + 1) % modes.length];
   stopSpeaking();
@@ -284,7 +303,8 @@ function applySpeedUI() {
 }
 
 function cycleSpeed() {
-  const i = SPEED_STEPS.indexOf(tts.speed);
+  let i = SPEED_STEPS.indexOf(tts.speed);
+  if (i < 0) i = 0;
   tts.speed = SPEED_STEPS[(i + 1) % SPEED_STEPS.length];
   localStorage.setItem(TTS_SPEED_STORAGE, String(tts.speed));
   // Apply live to anything currently playing.
@@ -440,25 +460,40 @@ function initTopicPicker() {
     suggestionsEl.appendChild(btn);
   });
 
-  // Group picker by category
-  const picker = $('#motion-picker');
+  // Custom panel grouped by category. Replaces a native <select> because
+  // Firefox renders <optgroup> with awkward nested popups.
+  const panel = $('#motion-browse-panel');
+  const browseBtn = $('#motion-browse-btn');
   const cats = [...new Set(TOPICS.map(t => t.cat))];
   cats.forEach((cat) => {
-    const group = document.createElement('optgroup');
-    group.label = cat;
+    const head = document.createElement('div');
+    head.className = 'motion-browse-cat';
+    head.textContent = cat;
+    panel.appendChild(head);
+    const row = document.createElement('div');
+    row.className = 'motion-browse-row';
     TOPICS.filter(t => t.cat === cat).forEach((t) => {
-      const opt = document.createElement('option');
-      opt.value = t.text;
-      opt.textContent = t.text;
-      group.appendChild(opt);
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'topic-chip';
+      chip.textContent = t.text;
+      chip.addEventListener('click', () => {
+        setMotion(t.text);
+        panel.classList.add('hidden');
+      });
+      row.appendChild(chip);
     });
-    picker.appendChild(group);
+    panel.appendChild(row);
   });
 
-  picker.addEventListener('change', () => {
-    if (picker.value) {
-      setMotion(picker.value);
-      picker.value = '';  // reset so same item can be re-selected
+  browseBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    if (panel.classList.contains('hidden')) return;
+    if (!panel.contains(e.target) && e.target !== browseBtn) {
+      panel.classList.add('hidden');
     }
   });
 }
@@ -1372,8 +1407,9 @@ document.body.style.overflow = 'auto';  // config screen: let window scroll
 disableUserInput();
 initConfig();
 bindButtons();
+applyTTSMode();
+applySpeedUI();
 loadServerConfig().then(() => {
   validate();
   applyTTSMode();
-  applySpeedUI();
 });

@@ -39,9 +39,8 @@
       <div class="motion-suggestions" id="motion-suggestions"></div>
       <textarea id="cfg-motion" rows="2" placeholder='This house believes that AI should replace human judges in criminal courts.'></textarea>
       <div class="motion-browse">
-        <select id="motion-picker">
-          <option value="">▾ browse 100+ topic ideas...</option>
-        </select>
+        <button type="button" id="motion-browse-btn" class="motion-browse-btn">▾ browse 100+ topic ideas...</button>
+        <div id="motion-browse-panel" class="motion-browse-panel hidden"></div>
       </div>
     </div>
 
@@ -156,7 +155,7 @@
       <button id="mic-btn" class="btn-mic">🎤 MIC</button>
       <button id="submit-btn" class="btn-primary small">SUBMIT</button>
       <button id="tts-skip" class="btn-ghost hidden">⏭ SKIP TTS</button>
-      <button id="tts-toggle" class="btn-ghost" title="Cycle TTS: OpenAI / Native / Off">🔊 TTS</button>
+      <button id="tts-toggle" class="btn-ghost" title="Cycle TTS: Native / OpenAI / Off">🌐 NATIVE</button>
       <button id="tts-speed" class="btn-ghost" title="Cycle playback speed">⏩ 1x</button>
       <div class="timer-wrap">
         <div class="timer-text" id="timer-text">--:--</div>
