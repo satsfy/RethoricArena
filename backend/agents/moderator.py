@@ -18,23 +18,31 @@ Rules:
 - No throat-clearing, no platitudes."""
 
 
+_OPEN_TOKENS  = {"short": 120, "medium": 200, "long": 300}
+_CLOSE_TOKENS = {"short": 150, "medium": 280, "long": 420}
+
+
 async def stream_open(session: Session) -> AsyncIterator[str]:
     sys = _system(session)
+    max_tokens = _OPEN_TOKENS.get(session.config.response_length, _OPEN_TOKENS["short"])
+    sentences = "1-2 sentences" if session.config.response_length == "short" else "2-3 sentences"
     user_msg = (
-        "Open the debate. Introduce the motion crisply and set the stage. "
-        "Then invite the first AI debater to speak. 2-3 sentences max."
+        f"Open the debate. Introduce the motion crisply and set the stage. "
+        f"Then invite the first AI debater to speak. {sentences} max."
     )
-    async for chunk in llm_client.stream_completion(sys, [{"role": "user", "content": user_msg}], temperature=0.7, max_tokens=300):
+    async for chunk in llm_client.stream_completion(sys, [{"role": "user", "content": user_msg}], temperature=0.7, max_tokens=max_tokens):
         yield chunk
 
 
 async def stream_close(session: Session) -> AsyncIterator[str]:
     sys = _system(session)
     transcript = build_transcript(session.turns)
+    max_tokens = _CLOSE_TOKENS.get(session.config.response_length, _CLOSE_TOKENS["short"])
+    sentences = "2-3 sentences" if session.config.response_length == "short" else "3-4 sentences"
     user_msg = (
         f"The debate has concluded. Here is the full transcript:\n\n{transcript}\n\n"
-        "Now deliver a closing statement. Summarize the ground covered without taking sides. "
-        "3-4 sentences. End with a line that hands judgment to the audience."
+        f"Now deliver a closing statement. Summarize the ground covered without taking sides. "
+        f"{sentences}. End with a line that hands judgment to the audience."
     )
-    async for chunk in llm_client.stream_completion(sys, [{"role": "user", "content": user_msg}], temperature=0.7, max_tokens=400):
+    async for chunk in llm_client.stream_completion(sys, [{"role": "user", "content": user_msg}], temperature=0.7, max_tokens=max_tokens):
         yield chunk

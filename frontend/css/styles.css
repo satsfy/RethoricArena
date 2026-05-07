@@ -155,6 +155,8 @@ textarea:focus, input:focus { outline: none; border-color: var(--amber); }
   margin-top: 8px;
 }
 .motion-browse select {
+  -webkit-appearance: auto;
+  appearance: auto;
   background: var(--surface);
   color: var(--muted);
   border: 1px solid var(--border);

@@ -15,7 +15,7 @@ VOICE_FOR_SPEAKER = {
     "moderator": "onyx",
     "debater_rigorous":   "echo",
     "debater_populist":   "fable",
-    "debater_socratic":   "sage",
+    "debater_socratic":   "nova",
     "debater_pragmatist": "alloy",
     "debater_devil":      "ash",
 }

@@ -159,6 +159,7 @@ const DEFAULT_CONFIG = {
   audience_count: 3,
   audience_personas: ['academic', 'undecided_voter', 'policy_wonk'],
   input_method: 'voice',
+  response_length: 'short',
 };
 function loadSavedConfig() {
   try {
@@ -654,19 +655,58 @@ function connectWebSocket() {
   ws.onopen = () => setStatus('Connected. The moderator is preparing...');
 }
 
+// Buffer for stream messages that arrive while TTS is still playing.
+// Each entry is an array of {type,speaker,token?} for one complete speaker turn.
+// Flushed in order once lastTTSPromise resolves.
+const _streamQueue = [];
+let _streamQueueFlushing = false;
+
+function _enqueueStreamGroup(msgs) {
+  _streamQueue.push(msgs);
+  _flushStreamQueue();
+}
+
+function _flushStreamQueue() {
+  if (_streamQueueFlushing) return;
+  _streamQueueFlushing = true;
+  (function next() {
+    if (!_streamQueue.length) { _streamQueueFlushing = false; return; }
+    state.lastTTSPromise.then(() => {
+      const group = _streamQueue.shift();
+      for (const m of group) {
+        if (m.type === 'stream_start') onStreamStart(m.speaker);
+        else if (m.type === 'stream_token') onStreamToken(m.speaker, m.token);
+        else if (m.type === 'stream_end') onStreamEnd(m.speaker);
+      }
+      // onStreamEnd sets a new lastTTSPromise; loop after it resolves
+      next();
+    });
+  })();
+}
+
+// Accumulator for the current in-flight stream (non-analyst only).
+let _incomingGroup = null;
+
 function handleMessage(msg) {
   switch (msg.type) {
     case 'session_ready':
       setStatus('Session ready.');
       break;
     case 'stream_start':
-      onStreamStart(msg.speaker);
+      if (msg.speaker === 'analyst') { onStreamStart(msg.speaker); break; }
+      _incomingGroup = [{ type: 'stream_start', speaker: msg.speaker }];
       break;
     case 'stream_token':
-      onStreamToken(msg.speaker, msg.token);
+      if (msg.speaker === 'analyst') { onStreamToken(msg.speaker, msg.token); break; }
+      if (_incomingGroup) _incomingGroup.push({ type: 'stream_token', speaker: msg.speaker, token: msg.token });
       break;
     case 'stream_end':
-      onStreamEnd(msg.speaker);
+      if (msg.speaker === 'analyst') { onStreamEnd(msg.speaker); break; }
+      if (_incomingGroup) {
+        _incomingGroup.push({ type: 'stream_end', speaker: msg.speaker });
+        _enqueueStreamGroup(_incomingGroup);
+        _incomingGroup = null;
+      }
       break;
     case 'turn_saved':
       onTurnSaved(msg.turn);

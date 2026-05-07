@@ -23,6 +23,7 @@ class SessionConfig(BaseModel):
     audience_count: int = 3
     audience_personas: list[str] = Field(default_factory=lambda: ["academic", "undecided_voter", "policy_wonk"])
     input_method: Literal["voice", "text"] = "text"
+    response_length: Literal["short", "medium", "long"] = "short"
 
 
 class TurnMetadata(BaseModel):
