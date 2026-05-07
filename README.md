@@ -29,8 +29,8 @@ pip install -r backend/requirements.txt
 # Otherwise the app will prompt for one in the browser.
 echo "DEEPSEEK_API_KEY=sk-..." > .env
 
-uvicorn backend.main:app --reload --port 8000
-# open http://localhost:8000 in Chrome
+uvicorn backend.main:app --reload --port 8678
+# open http://localhost:8678 in Chrome
 ```
 
 ## Deploy to Coolify
@@ -38,7 +38,7 @@ uvicorn backend.main:app --reload --port 8000
 Coolify reads the `Dockerfile` in the repo root and handles the rest. One-time setup:
 
 1. **In Coolify** → New Resource → Application → Public or Private Repository → paste this repo URL.
-2. **Build Pack:** Dockerfile (auto-detected). **Port:** `8000`. **Domain:** whatever you want.
+2. **Build Pack:** Dockerfile (auto-detected). **Port:** `8678`. **Domain:** whatever you want.
 3. **Environment variables (optional):**
    - `DEEPSEEK_API_KEY` — if set, every visitor uses your key (the BYOK prompt is hidden). Leave it unset if you want each user to bring their own key.
 4. **Persistent storage (optional):** mount `/app/storage` if you want session JSON files to survive redeploys. Skip it if you don't care about saved transcripts.

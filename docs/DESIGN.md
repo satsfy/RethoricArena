@@ -44,7 +44,7 @@ pydantic
 ## 2. System Architecture
 
 ```
-Browser (localhost:8000)
+Browser (localhost:8678)
   |
   |-- HTTP GET /          --> serves index.html + static assets
   |-- WebSocket /ws/{id}  --> bidirectional real-time channel
@@ -818,10 +818,10 @@ cp .env.example .env
 # Edit .env and add your API KEY for LLM <To Be Determined Below>
 
 # 4. Run the server
-uvicorn backend.main:app --reload --port 8000
+uvicorn backend.main:app --reload --port 8678
 
 # 5. Open the app
-# Open Chrome and go to: http://localhost:8000
+# Open Chrome and go to: http://localhost:8678
 # Chrome is required for Web Speech API voice input
 ```
 
