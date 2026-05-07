@@ -18,6 +18,16 @@ At the end, the audience delivers their verdict: were they convinced? Each membe
 
 ![Audience verdict](docs/assets/image%20copy.png)
 
+## (optional) Install TTS tools for local voice output
+
+Depending on your Browser, TTS tools might have inferior quality (such as in Firefox). You can install tool for addressing this or use Chatgpt TTS (which has some latency).
+
+```
+sudo apt install speech-dispatcher-pico2wave
+sudo apt install libttspico-utils
+
+```
+
 ## Run locally
 
 ```bash
@@ -46,7 +56,7 @@ Coolify reads the `Dockerfile` in the repo root and handles the rest. One-time s
 4. **Persistent storage (optional):** mount `/app/storage` if you want session JSON files to survive redeploys. Skip it if you don't care about saved transcripts.
 5. **Deploy.**
 
-**Auto-deploy on push:** in the Coolify app's *Settings* tab, copy the webhook URL and add it to your GitHub repo (Settings → Webhooks → Add webhook → paste URL → content type `application/json` → push events). Every `git push` to the tracked branch triggers a rebuild.
+**Auto-deploy on push:** in the Coolify app's _Settings_ tab, copy the webhook URL and add it to your GitHub repo (Settings → Webhooks → Add webhook → paste URL → content type `application/json` → push events). Every `git push` to the tracked branch triggers a rebuild.
 
 That's it. No image registry, no compose file, no manual `docker build`.
 
@@ -69,13 +79,13 @@ Each debate run costs roughly 1–3 cents at DeepSeek's prices. The disclaimer i
 
 ## Agents
 
-| Agent | When | Purpose |
-|---|---|---|
-| Moderator | Open + close | Frames the debate |
-| Debater(s) | Each AI turn | Argue the opposing side |
-| Evaluator | After each user turn | Toastmasters-style feedback |
-| Audience | At end | Independent reactions and votes |
-| Analyst | At end | Full rhetorical report |
+| Agent      | When                 | Purpose                         |
+| ---------- | -------------------- | ------------------------------- |
+| Moderator  | Open + close         | Frames the debate               |
+| Debater(s) | Each AI turn         | Argue the opposing side         |
+| Evaluator  | After each user turn | Toastmasters-style feedback     |
+| Audience   | At end               | Independent reactions and votes |
+| Analyst    | At end               | Full rhetorical report          |
 
 All run on `deepseek-chat`. Cost per session is roughly a few cents.
 
