@@ -40,19 +40,37 @@ body {
 }
 .amber { color: var(--amber); }
 .muted { color: var(--muted); }
-.display { font-family: var(--display); font-weight: 900; font-size: 48px; margin: 0 0 8px; letter-spacing: -0.01em; }
+.display { font-family: var(--display); font-weight: 900; font-size: 40px; margin: 0 0 6px; letter-spacing: -0.01em; }
 .center { text-align: center; }
 
 /* ============= CONFIG ============= */
 .config-grid {
-  max-width: 720px;
+  max-width: 920px;
   margin: 0 auto;
-  padding: 48px 32px;
+  padding: 24px 36px 32px;
   overflow-y: auto;
   flex: 1;
   width: 100%;
 }
-.field { margin-bottom: 28px; }
+
+@media (min-width: 820px) {
+  .config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 48px;
+    align-items: start;
+  }
+  /* Items that span both columns */
+  .config-grid > h1,
+  .config-grid > p,
+  #key-field,
+  .field-full,
+  #enter-arena { grid-column: 1 / -1; }
+  .field { margin-bottom: 18px; }
+  .config-grid > h1 { margin-bottom: 4px; }
+  .config-grid > p { margin-bottom: 16px; }
+}
+.field { margin-bottom: 20px; }
 .field label {
   display: block;
   font-family: var(--ui);
