@@ -56,9 +56,13 @@ const state = {
   lastTTSPromise: Promise.resolve(),
 };
 
-// ---------- TTS (server OpenAI, browser SpeechSynthesis fallback) ----------
+// ---------- TTS (server OpenAI, browser SpeechSynthesis, off) ----------
+// Three modes, cycled by the TTS button. Server TTS sounds great but has 1-3s
+// of latency before audio starts; native is instant but voices are mediocre
+// (especially on Firefox). Mode persists in localStorage.
+const TTS_STORAGE = 'rhetoricarena.tts_mode';
 const tts = {
-  enabled: true,
+  mode: localStorage.getItem(TTS_STORAGE) || 'server',  // 'server' | 'browser' | 'off'
   voices: [],
   voiceMap: {},
   current: null,           // current SpeechSynthesisUtterance
@@ -88,18 +92,40 @@ function pickVoice(speakerId) {
 }
 
 async function speak(speakerId, text) {
-  if (!tts.enabled || !text) return;
-  // Prefer server-side OpenAI TTS when available; it sounds dramatically better
-  // than SpeechSynthesis (especially on Firefox).
-  if (state.ttsAvailable) {
+  if (!text || tts.mode === 'off') return;
+  if (tts.mode === 'server' && state.ttsAvailable) {
     try {
       await speakViaServer(speakerId, text);
       return;
     } catch (e) {
-      // Fall through to browser TTS.
+      // Fall through to browser TTS on transient server failure.
     }
   }
   await speakViaBrowser(speakerId, text);
+}
+
+function applyTTSMode() {
+  // Coerce server mode to browser when server TTS isn't actually available.
+  if (tts.mode === 'server' && !state.ttsAvailable) tts.mode = 'browser';
+  if (!['server', 'browser', 'off'].includes(tts.mode)) tts.mode = state.ttsAvailable ? 'server' : 'browser';
+  localStorage.setItem(TTS_STORAGE, tts.mode);
+
+  const btn = document.getElementById('tts-toggle');
+  if (btn) {
+    if (tts.mode === 'server')  btn.textContent = '🔊 OPENAI';
+    else if (tts.mode === 'browser') btn.textContent = '🌐 NATIVE';
+    else                              btn.textContent = '🔇 OFF';
+    btn.title = `TTS mode: ${tts.mode}. Click to cycle.`;
+  }
+  if (tts.mode === 'off') stopSpeaking();
+}
+
+function cycleTTSMode() {
+  const modes = state.ttsAvailable ? ['server', 'browser', 'off'] : ['browser', 'off'];
+  const i = modes.indexOf(tts.mode);
+  tts.mode = modes[(i + 1) % modes.length];
+  stopSpeaking();
+  applyTTSMode();
 }
 
 function speakViaBrowser(speakerId, text) {
@@ -185,7 +211,7 @@ const KEY_STORAGE = 'rhetoricarena.deepseek_api_key';
 
 async function loadServerConfig() {
   try {
-    const r = await fetch('/api/config');
+    const r = await fetch('/api/config', { cache: 'no-store' });
     const data = await r.json();
     state.serverHasKey = !!data.server_has_key;
     state.transcriptionAvailable = !!data.transcription_available;
@@ -657,7 +683,7 @@ function setupSpeech() {
         setStatus('Browser speech blocked, switching to server transcription.');
         state.voiceMode = 'media_recorder';
       } else {
-        disableMic('Voice input unavailable: browser blocked Google speech servers. Use Chrome, or have the host enable server transcription (GROQ_API_KEY).');
+        disableMic('Voice input unavailable: browser blocked Google speech servers. Use Chrome, or have the host set OPENAI_API_KEY (or GROQ_API_KEY) for server transcription.');
       }
     } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       disableMic('Microphone permission denied. Use the text input instead.');
@@ -817,11 +843,21 @@ async function postTranscribe(blob, signal) {
 }
 
 // --- Unified entry points used by the mic button handlers ---
-function startRecognition() {
+async function startRecognition() {
   if (state.recognitionDisabled) return;
   if (!state.voiceMode) state.voiceMode = detectVoiceMode();
+  // If we still don't have a mode, the config may not have loaded yet
+  // (or finished before the user clicked). Refetch and re-detect once.
   if (!state.voiceMode) {
-    disableMic('Voice not supported here. The host can enable server transcription by setting GROQ_API_KEY.');
+    setStatus('Checking voice availability...');
+    await loadServerConfig();
+    state.voiceMode = detectVoiceMode();
+  }
+  if (!state.voiceMode) {
+    setStatus(
+      'Voice unavailable: this browser has no SpeechRecognition and the server has no transcription provider. ' +
+      'Hosts: set OPENAI_API_KEY or GROQ_API_KEY and redeploy.'
+    );
     return;
   }
   if (state.voiceMode === 'speech_recognition') {
@@ -988,11 +1024,7 @@ function bindButtons() {
     showTTSControls(false);
   });
 
-  $('#tts-toggle').addEventListener('click', () => {
-    tts.enabled = !tts.enabled;
-    $('#tts-toggle').textContent = tts.enabled ? '🔊 TTS' : '🔇 TTS';
-    if (!tts.enabled) stopSpeaking();
-  });
+  $('#tts-toggle').addEventListener('click', cycleTTSMode);
 
   $('#user-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -1045,4 +1077,7 @@ function bindButtons() {
 disableUserInput();
 initConfig();
 bindButtons();
-loadServerConfig().then(validate);
+loadServerConfig().then(() => {
+  validate();
+  applyTTSMode();
+});
