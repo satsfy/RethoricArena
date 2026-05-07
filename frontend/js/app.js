@@ -528,7 +528,7 @@ function onStreamEnd(speaker) {
     if (card) card.classList.remove('speaking');
   }
   // Auto-speak everything except the analyst report.
-  if (speaker !== 'analyst' && tts.enabled) {
+  if (speaker !== 'analyst' && tts.mode !== 'off') {
     const text = state.liveBuffers[speaker] || '';
     showTTSControls(true, speaker);
     state.lastTTSPromise = speak(speaker, text).then(() => {
