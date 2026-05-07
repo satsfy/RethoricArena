@@ -2,12 +2,14 @@
 import asyncio
 import json
 from pathlib import Path
+from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from .models.schemas import SessionConfig
-from . import session_manager, debate_engine
+from . import session_manager, debate_engine, llm_client
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -16,15 +18,36 @@ app = FastAPI(title="RhetoricArena")
 
 app.mount("/static", StaticFiles(directory=str(FRONTEND)), name="static")
 
+# In-memory: session_id -> user-supplied DeepSeek API key.
+# Never persisted to disk. Cleared on process restart.
+_session_keys: dict[str, str] = {}
+
+
+class SessionCreatePayload(BaseModel):
+    config: SessionConfig
+    api_key: Optional[str] = None
+
 
 @app.get("/")
 async def index():
     return FileResponse(str(FRONTEND / "index.html"))
 
 
+@app.get("/api/config")
+async def app_config():
+    """Tells the frontend whether the server has its own API key.
+
+    If true, the frontend can skip the BYOK prompt. If false, the user must
+    supply a key for the session to work.
+    """
+    return {"server_has_key": llm_client.server_has_key()}
+
+
 @app.post("/session")
-async def create_session(config: SessionConfig):
-    s = session_manager.create_session(config)
+async def create_session(payload: SessionCreatePayload):
+    s = session_manager.create_session(payload.config)
+    if payload.api_key:
+        _session_keys[s.id] = payload.api_key.strip()
     return {"session_id": s.id}
 
 
@@ -52,6 +75,7 @@ async def list_all():
 @app.delete("/session/{sid}")
 async def delete_session(sid: str):
     ok = session_manager.delete(sid)
+    _session_keys.pop(sid, None)
     if not ok:
         raise HTTPException(404)
     return {"deleted": True}
@@ -63,6 +87,15 @@ async def ws(ws: WebSocket, sid: str):
     session = session_manager.load(sid)
     if not session:
         await ws.send_json({"type": "error", "message": "session not found"})
+        await ws.close()
+        return
+
+    # Bind the user-provided key (if any) to this WebSocket's async context.
+    # Falls back to env var inside the LLM client when None.
+    llm_client.set_api_key(_session_keys.get(sid))
+
+    if not _session_keys.get(sid) and not llm_client.server_has_key():
+        await ws.send_json({"type": "error", "message": "No DeepSeek API key configured. Refresh and add a key."})
         await ws.close()
         return
 
@@ -78,6 +111,10 @@ async def ws(ws: WebSocket, sid: str):
         async with lock:
             try:
                 await debate_engine.run_intro(session, send)
+            except llm_client.NoAPIKeyError as e:
+                await send({"type": "error", "message": str(e)})
+                await ws.close()
+                return
             except Exception as e:
                 await send({"type": "error", "message": f"intro failed: {e}"})
 
@@ -100,6 +137,8 @@ async def ws(ws: WebSocket, sid: str):
                 async with lock:
                     try:
                         await debate_engine.handle_user_turn(session, send, content, input_method)
+                    except llm_client.NoAPIKeyError as e:
+                        await send({"type": "error", "message": str(e)})
                     except Exception as e:
                         await send({"type": "error", "message": f"turn failed: {e}"})
 
