@@ -194,6 +194,9 @@ const $$ = (sel) => document.querySelectorAll(sel);
 function showScreen(id) {
   $$('.screen').forEach((s) => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  // Config is a form that should scroll naturally; all other screens are
+  // fixed-height panels that must not let the window scroll.
+  document.body.style.overflow = id === 'screen-config' ? 'auto' : 'hidden';
 }
 
 function speakerLabel(speaker) {
@@ -1074,6 +1077,7 @@ function bindButtons() {
 }
 
 // ---------- Init ----------
+document.body.style.overflow = 'auto';  // config screen: let window scroll
 disableUserInput();
 initConfig();
 bindButtons();
