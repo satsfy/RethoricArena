@@ -1,0 +1,15 @@
+.git
+.gitignore
+venv
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.local
+storage
+docs
+README.md
+debate*.md
+image.png
+.DS_Store
