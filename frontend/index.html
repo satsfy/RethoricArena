@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RhetoricArena</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+
+<!-- ======================= CONFIG SCREEN ======================= -->
+<section id="screen-config" class="screen active">
+  <header class="topbar">
+    <div class="brand">RHETORIC<span class="amber">ARENA</span></div>
+  </header>
+
+  <div class="config-grid">
+    <h1 class="display">Step into the arena.</h1>
+    <p class="muted">Configure your debate. Set the motion. Pick your opponents. Then enter.</p>
+
+    <div class="field">
+      <label>The Motion</label>
+      <textarea id="cfg-motion" rows="2" placeholder='This house believes that AI should replace human judges in criminal courts.'></textarea>
+    </div>
+
+    <div class="field">
+      <label>Your Position</label>
+      <div class="choices" data-key="user_position">
+        <button class="choice" data-val="for">FOR</button>
+        <button class="choice active" data-val="against">AGAINST</button>
+        <button class="choice" data-val="devil">DEVIL'S ADVOCATE</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Difficulty</label>
+      <div class="choices" data-key="difficulty">
+        <button class="choice" data-val="warmup">WARM-UP</button>
+        <button class="choice active" data-val="standard">STANDARD</button>
+        <button class="choice" data-val="hard">HARD</button>
+        <button class="choice" data-val="brutal">BRUTAL</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Time Per Turn</label>
+      <div class="choices" data-key="time_per_turn_seconds">
+        <button class="choice" data-val="30">30s</button>
+        <button class="choice active" data-val="60">60s</button>
+        <button class="choice" data-val="90">90s</button>
+        <button class="choice" data-val="120">2m</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Max Turns <span id="max-turns-label" class="muted">6</span></label>
+      <input type="range" id="cfg-max-turns" min="3" max="10" value="6" />
+    </div>
+
+    <div class="field">
+      <label>Opponents</label>
+      <div class="choices" data-key="debater_count" id="debater-count">
+        <button class="choice" data-val="1">1</button>
+        <button class="choice active" data-val="2">2</button>
+        <button class="choice" data-val="3">3</button>
+      </div>
+      <div class="dropdowns" id="debater-slots"></div>
+    </div>
+
+    <div class="field">
+      <label>Audience</label>
+      <div class="choices" data-key="audience_count" id="audience-count">
+        <button class="choice" data-val="2">2</button>
+        <button class="choice active" data-val="3">3</button>
+      </div>
+      <div class="dropdowns" id="audience-slots"></div>
+    </div>
+
+    <div class="field">
+      <label>Input Method</label>
+      <div class="choices" data-key="input_method">
+        <button class="choice active" data-val="text">⌨️ TEXT</button>
+        <button class="choice" data-val="voice">🎤 VOICE</button>
+      </div>
+    </div>
+
+    <button id="enter-arena" class="btn-primary" disabled>ENTER THE ARENA</button>
+  </div>
+</section>
+
+<!-- ======================= ARENA SCREEN ======================= -->
+<section id="screen-arena" class="screen">
+  <header class="topbar arena-bar">
+    <div class="brand">◈ RHETORIC<span class="amber">ARENA</span></div>
+    <div class="motion-pill" id="motion-pill"></div>
+    <div class="turn-counter">
+      Turn <span id="turn-current">0</span>/<span id="turn-max">6</span>
+      <button id="end-early" class="btn-ghost">■ END</button>
+    </div>
+  </header>
+
+  <div class="arena-main">
+    <div class="arena-left">
+      <div class="panel-header">ARENA</div>
+      <div id="debater-cards" class="debater-cards"></div>
+
+      <div class="panel-header">TRANSCRIPT</div>
+      <div id="transcript" class="transcript"></div>
+    </div>
+
+    <div class="arena-right">
+      <div class="panel-header">AUDIENCE</div>
+      <div id="audience-list" class="audience-list"></div>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-label">YOUR TURN</div>
+    <textarea id="user-input" rows="3" placeholder="Type your response, or hold the mic..."></textarea>
+    <div class="input-controls">
+      <button id="mic-btn" class="btn-mic">🎤 HOLD TO SPEAK</button>
+      <button id="submit-btn" class="btn-primary small">SUBMIT</button>
+      <button id="tts-skip" class="btn-ghost hidden">⏭ SKIP TTS</button>
+      <button id="tts-toggle" class="btn-ghost" title="Mute or unmute TTS">🔊 TTS</button>
+      <div class="timer-wrap">
+        <div class="timer-text" id="timer-text">--:--</div>
+        <div class="timer-bar"><div id="timer-fill"></div></div>
+      </div>
+    </div>
+    <div id="status-line" class="status-line"></div>
+  </div>
+</section>
+
+<!-- ======================= EVALUATOR CARD ======================= -->
+<div id="eval-card" class="eval-card hidden">
+  <div class="eval-head">
+    <span>EVALUATOR FEEDBACK <span id="eval-turn" class="muted"></span></span>
+    <button id="eval-close" class="btn-ghost">✕ skip</button>
+  </div>
+  <div class="eval-bar"><span>STRUCTURE</span><div class="bar"><div id="bar-structure"></div></div><b id="score-structure">0</b>/10</div>
+  <div class="eval-bar"><span>LOGIC</span><div class="bar"><div id="bar-logic"></div></div><b id="score-logic">0</b>/10</div>
+  <div class="eval-bar"><span>RHETORIC</span><div class="bar"><div id="bar-rhetoric"></div></div><b id="score-rhetoric">0</b>/10</div>
+
+  <div class="eval-block">
+    <div class="eval-label highlight">⭐ HIGHLIGHT</div>
+    <div id="eval-highlight"></div>
+  </div>
+  <div class="eval-block">
+    <div class="eval-label warn">⚠ BLIND SPOT</div>
+    <div id="eval-blindspot"></div>
+  </div>
+  <div class="eval-block">
+    <div class="eval-label tip">→ TIP FOR NEXT TURN</div>
+    <div id="eval-tip"></div>
+  </div>
+  <div class="eval-flair" id="eval-flair"></div>
+  <button id="eval-continue" class="btn-primary small">CONTINUE</button>
+</div>
+
+<!-- ======================= AUDIENCE REVEAL ======================= -->
+<section id="screen-reveal" class="screen">
+  <h1 class="display center">THE VERDICT</h1>
+  <p class="center muted">The audience has made their decision.</p>
+  <div id="reveal-cards" class="reveal-cards"></div>
+  <div id="tally" class="tally"></div>
+  <button id="view-analysis" class="btn-primary">VIEW FULL ANALYSIS</button>
+</section>
+
+<!-- ======================= REPORT SCREEN ======================= -->
+<section id="screen-report" class="screen">
+  <header class="topbar">
+    <div class="brand">POST-DEBATE ANALYSIS</div>
+    <div>
+      <button id="save-report" class="btn-ghost">💾 SAVE AS MARKDOWN</button>
+      <button id="new-session" class="btn-primary small">🔄 NEW SESSION</button>
+    </div>
+  </header>
+  <article id="report-body" class="report"></article>
+</section>
+
+<script src="/static/js/app.js" type="module"></script>
+</body>
+</html>
