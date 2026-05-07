@@ -103,6 +103,30 @@ textarea:focus, input:focus { outline: none; border-color: var(--amber); }
 
 input[type=range] { width: 100%; accent-color: var(--amber); }
 
+input[type=password] {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 14px;
+}
+input[type=password]:focus { outline: none; border-color: var(--amber); }
+
+.key-disclaimer {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-left: 3px solid var(--amber);
+  border-radius: 4px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.key-disclaimer a { color: var(--amber); }
+
 .btn-primary {
   background: var(--amber);
   color: #16160e;

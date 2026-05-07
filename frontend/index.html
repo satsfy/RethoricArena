@@ -21,6 +21,19 @@
     <h1 class="display">Step into the arena.</h1>
     <p class="muted">Configure your debate. Set the motion. Pick your opponents. Then enter.</p>
 
+    <div class="field" id="key-field" style="display:none">
+      <label>DeepSeek API Key</label>
+      <input type="password" id="cfg-api-key" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+      <div class="key-disclaimer">
+        🔑 This server does not have its own key. Paste yours so this session can run.
+        Your key is sent over HTTPS, held in server memory only for the lifetime of this session,
+        never written to disk, and never shared with anyone else. Each debate costs roughly 1–3 cents
+        in DeepSeek API charges, billed to your account.
+        Get a key at <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">platform.deepseek.com/api_keys</a>.
+        We remember your key in this browser's localStorage so you don't have to paste it again.
+      </div>
+    </div>
+
     <div class="field">
       <label>The Motion</label>
       <textarea id="cfg-motion" rows="2" placeholder='This house believes that AI should replace human judges in criminal courts.'></textarea>

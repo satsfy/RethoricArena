@@ -32,6 +32,8 @@ const state = {
   },
   sessionId: null,
   ws: null,
+  apiKey: '',
+  serverHasKey: false,
   currentSpeaker: null,
   liveBuffers: {},   // speaker -> string
   timer: null,
@@ -114,6 +116,33 @@ function speakerLabel(speaker) {
     return (DEBATERS[id]?.name || id).toUpperCase();
   }
   return speaker.toUpperCase();
+}
+
+// ---------- BYOK ----------
+const KEY_STORAGE = 'rhetoricarena.deepseek_api_key';
+
+async function loadServerConfig() {
+  try {
+    const r = await fetch('/api/config');
+    const data = await r.json();
+    state.serverHasKey = !!data.server_has_key;
+  } catch {
+    state.serverHasKey = false;
+  }
+
+  if (!state.serverHasKey) {
+    $('#key-field').style.display = '';
+    const saved = localStorage.getItem(KEY_STORAGE) || '';
+    if (saved) {
+      $('#cfg-api-key').value = saved;
+      state.apiKey = saved;
+    }
+    $('#cfg-api-key').addEventListener('input', (e) => {
+      state.apiKey = e.target.value.trim();
+      if (state.apiKey) localStorage.setItem(KEY_STORAGE, state.apiKey);
+      validate();
+    });
+  }
 }
 
 // ---------- Config screen wiring ----------
@@ -207,7 +236,9 @@ function renderAudienceSlots() {
 }
 
 function validate() {
-  $('#enter-arena').disabled = !state.config.motion || state.config.motion.length < 5;
+  const motionOk = state.config.motion && state.config.motion.length >= 5;
+  const keyOk = state.serverHasKey || (state.apiKey && state.apiKey.startsWith('sk-'));
+  $('#enter-arena').disabled = !(motionOk && keyOk);
 }
 
 // ---------- Enter arena ----------
@@ -215,10 +246,12 @@ async function enterArena() {
   $('#enter-arena').disabled = true;
   $('#enter-arena').textContent = 'STARTING...';
   try {
+    const body = { config: state.config };
+    if (!state.serverHasKey && state.apiKey) body.api_key = state.apiKey;
     const resp = await fetch('/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state.config),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) throw new Error('failed to create session');
     const data = await resp.json();
@@ -751,3 +784,4 @@ function bindButtons() {
 disableUserInput();
 initConfig();
 bindButtons();
+loadServerConfig().then(validate);
