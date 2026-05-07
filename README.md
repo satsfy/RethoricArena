@@ -84,6 +84,10 @@ All run on `deepseek-chat`. Cost per session is roughly a few cents.
 Two paths, picked automatically per browser:
 
 - **Chrome / Edge:** uses the browser-native Web Speech API. Free, instant, runs entirely in the browser.
-- **Firefox / Safari / Brave-with-Google-blocked:** records audio with MediaRecorder, posts to `/api/transcribe`, server forwards to Whisper. Requires `GROQ_API_KEY` (free tier, recommended) or `OPENAI_API_KEY` to be set on the server.
+- **Firefox / Safari / Brave-with-Google-blocked:** records audio with MediaRecorder, posts to `/api/transcribe` every ~1.8 seconds while you speak, and replaces the input box with the latest server transcript. A final pass runs at the end for the cleanest result. Requires `GROQ_API_KEY` (free tier, recommended) or `OPENAI_API_KEY` on the server.
 
-Hold the mic button, speak, release. Submit normally.
+Hold the mic button, speak, release.
+
+## Voice output (TTS)
+
+If `OPENAI_API_KEY` is set on the server, AI turns are spoken via OpenAI's `gpt-4o-mini-tts` (different OpenAI voice per debater) instead of the browser's `SpeechSynthesis`. This sounds dramatically better, especially on Firefox where the built-in voices are rough. Without the key set, the app falls back to `SpeechSynthesis` automatically.

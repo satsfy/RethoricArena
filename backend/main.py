@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .models.schemas import SessionConfig
-from . import session_manager, debate_engine, llm_client, transcribe
+from . import session_manager, debate_engine, llm_client, transcribe, tts
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -42,7 +42,26 @@ async def app_config():
     return {
         "server_has_key": llm_client.server_has_key(),
         "transcription_available": transcribe.is_available(),
+        "tts_available": tts.is_available(),
     }
+
+
+class TTSPayload(BaseModel):
+    text: str
+    speaker: Optional[str] = None
+
+
+@app.post("/api/tts")
+async def tts_endpoint(payload: TTSPayload):
+    if not tts.is_available():
+        raise HTTPException(status_code=503, detail="Server TTS is not configured.")
+    if not payload.text or not payload.text.strip():
+        raise HTTPException(status_code=400, detail="Empty text.")
+    voice = tts.voice_for(payload.speaker)
+    return StreamingResponse(
+        tts.synthesize_stream(payload.text, voice),
+        media_type="audio/mpeg",
+    )
 
 
 @app.post("/api/transcribe")

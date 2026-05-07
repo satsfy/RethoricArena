@@ -35,10 +35,15 @@ const state = {
   apiKey: '',
   serverHasKey: false,
   transcriptionAvailable: false,
+  ttsAvailable: false,
   voiceMode: null,           // 'speech_recognition' | 'media_recorder' | null
   mediaRecorder: null,
   recordingChunks: [],
   recordingStream: null,
+  recordingMime: '',
+  preRecordingText: '',
+  liveTranscribeTimer: null,
+  liveTranscribeAbort: null,
   currentSpeaker: null,
   liveBuffers: {},   // speaker -> string
   timer: null,
@@ -51,12 +56,14 @@ const state = {
   lastTTSPromise: Promise.resolve(),
 };
 
-// ---------- TTS (browser SpeechSynthesis) ----------
+// ---------- TTS (server OpenAI, browser SpeechSynthesis fallback) ----------
 const tts = {
   enabled: true,
   voices: [],
   voiceMap: {},
-  current: null,
+  current: null,           // current SpeechSynthesisUtterance
+  currentAudio: null,      // current <audio> element when using server TTS
+  currentAudioUrl: null,
 };
 
 function loadVoices() {
@@ -80,9 +87,24 @@ function pickVoice(speakerId) {
   return v;
 }
 
-function speak(speakerId, text) {
+async function speak(speakerId, text) {
+  if (!tts.enabled || !text) return;
+  // Prefer server-side OpenAI TTS when available; it sounds dramatically better
+  // than SpeechSynthesis (especially on Firefox).
+  if (state.ttsAvailable) {
+    try {
+      await speakViaServer(speakerId, text);
+      return;
+    } catch (e) {
+      // Fall through to browser TTS.
+    }
+  }
+  await speakViaBrowser(speakerId, text);
+}
+
+function speakViaBrowser(speakerId, text) {
   return new Promise((resolve) => {
-    if (!tts.enabled || !text || !window.speechSynthesis) { resolve(); return; }
+    if (!window.speechSynthesis) { resolve(); return; }
     try { speechSynthesis.cancel(); } catch {}
     const u = new SpeechSynthesisUtterance(text);
     const v = pickVoice(speakerId);
@@ -98,10 +120,45 @@ function speak(speakerId, text) {
   });
 }
 
+async function speakViaServer(speakerId, text) {
+  const r = await fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, speaker: speakerId }),
+  });
+  if (!r.ok) throw new Error('tts http ' + r.status);
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const audio = new Audio(url);
+  audio.preload = 'auto';
+  tts.currentAudio = audio;
+  tts.currentAudioUrl = url;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true;
+      tts.currentAudio = null;
+      try { URL.revokeObjectURL(url); } catch {}
+      tts.currentAudioUrl = null;
+      resolve();
+    };
+    audio.onended = finish;
+    audio.onerror = finish;
+    audio.play().catch(finish);
+  });
+}
+
 function stopSpeaking() {
-  if (!window.speechSynthesis) return;
-  try { speechSynthesis.cancel(); } catch {}
+  if (window.speechSynthesis) {
+    try { speechSynthesis.cancel(); } catch {}
+  }
   tts.current = null;
+  if (tts.currentAudio) {
+    try { tts.currentAudio.pause(); } catch {}
+    if (tts.currentAudioUrl) { try { URL.revokeObjectURL(tts.currentAudioUrl); } catch {} }
+    tts.currentAudio = null;
+    tts.currentAudioUrl = null;
+  }
 }
 
 // ---------- Helpers ----------
@@ -132,9 +189,11 @@ async function loadServerConfig() {
     const data = await r.json();
     state.serverHasKey = !!data.server_has_key;
     state.transcriptionAvailable = !!data.transcription_available;
+    state.ttsAvailable = !!data.tts_available;
   } catch {
     state.serverHasKey = false;
     state.transcriptionAvailable = false;
+    state.ttsAvailable = false;
   }
 
   if (!state.serverHasKey) {
@@ -617,12 +676,23 @@ function setupSpeech() {
   return r;
 }
 
-// --- Path 2: MediaRecorder + server-side Whisper ---
+// --- Path 2: MediaRecorder + server-side Whisper, with progressive live updates ---
+//
+// While recording we send the cumulative audio buffer to /api/transcribe every
+// LIVE_INTERVAL_MS so the user sees their transcript updating in near-real-time.
+// Each interval cancels any in-flight earlier request, and the latest result
+// replaces the live portion of the input. On stop, one final transcription
+// runs against the complete audio for highest accuracy.
+
+const LIVE_INTERVAL_MS = 1800;
+
 async function startMediaRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.recordingStream = stream;
     state.recordingChunks = [];
+    state.preRecordingText = $('#user-input').value.trim();
+
     const candidates = [
       'audio/webm;codecs=opus',
       'audio/webm',
@@ -632,19 +702,25 @@ async function startMediaRecording() {
     const mime = candidates.find((m) => window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
     const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
     state.mediaRecorder = mr;
+    state.recordingMime = mr.mimeType || mime || 'audio/webm';
+
     mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) state.recordingChunks.push(e.data); };
     mr.onstop = async () => {
+      stopLiveTranscribeLoop();
       try { stream.getTracks().forEach((t) => t.stop()); } catch {}
       state.recordingStream = null;
-      const blob = new Blob(state.recordingChunks, { type: mr.mimeType || 'audio/webm' });
+      const blob = new Blob(state.recordingChunks, { type: state.recordingMime });
       state.recordingChunks = [];
-      if (blob.size === 0) { setStatus(''); return; }
-      await sendForTranscription(blob);
+      if (blob.size === 0) { setStatus(''); $('#mic-btn').disabled = false; return; }
+      await runFinalTranscription(blob);
     };
-    mr.start();
+    // 1-second timeslice so we get incremental ondataavailable callbacks.
+    mr.start(1000);
     state.recognizing = true;
     $('#mic-btn').classList.add('recording');
-    setStatus('🎙️ Recording. Release to transcribe.');
+    setStatus('🎙️ Recording...');
+
+    startLiveTranscribeLoop();
   } catch (err) {
     if (err && err.name === 'NotAllowedError') {
       disableMic('Microphone permission denied.');
@@ -657,6 +733,7 @@ async function startMediaRecording() {
 function stopMediaRecording() {
   state.recognizing = false;
   $('#mic-btn').classList.remove('recording');
+  stopLiveTranscribeLoop();
   const mr = state.mediaRecorder;
   if (mr && mr.state !== 'inactive') {
     try { mr.stop(); } catch {}
@@ -667,33 +744,76 @@ function stopMediaRecording() {
   }
 }
 
-async function sendForTranscription(blob) {
-  setStatus('Transcribing...');
+function startLiveTranscribeLoop() {
+  stopLiveTranscribeLoop();
+  let inFlight = false;
+  state.liveTranscribeTimer = setInterval(async () => {
+    if (inFlight) return;
+    if (!state.recordingChunks.length) return;
+    inFlight = true;
+
+    // Abort any earlier still-pending request.
+    if (state.liveTranscribeAbort) { try { state.liveTranscribeAbort.abort(); } catch {} }
+    const ac = new AbortController();
+    state.liveTranscribeAbort = ac;
+
+    try {
+      const blob = new Blob(state.recordingChunks.slice(), { type: state.recordingMime });
+      const transcript = await postTranscribe(blob, ac.signal);
+      // Only apply if we are still the latest in-flight request and still recording.
+      if (state.liveTranscribeAbort === ac && state.recognizing && transcript) {
+        applyLiveTranscript(transcript);
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        // Soft-fail live updates; the final transcription still runs on stop.
+      }
+    } finally {
+      inFlight = false;
+    }
+  }, LIVE_INTERVAL_MS);
+}
+
+function stopLiveTranscribeLoop() {
+  if (state.liveTranscribeTimer) clearInterval(state.liveTranscribeTimer);
+  state.liveTranscribeTimer = null;
+  if (state.liveTranscribeAbort) { try { state.liveTranscribeAbort.abort(); } catch {} }
+  state.liveTranscribeAbort = null;
+}
+
+function applyLiveTranscript(transcript) {
+  const pre = state.preRecordingText;
+  $('#user-input').value = pre ? pre + ' ' + transcript : transcript;
+}
+
+async function runFinalTranscription(blob) {
+  setStatus('Finalizing transcript...');
   $('#mic-btn').disabled = true;
   try {
-    const ext = blob.type.includes('webm') ? 'webm'
-              : blob.type.includes('ogg') ? 'ogg'
-              : blob.type.includes('mp4') ? 'm4a'
-              : 'webm';
-    const fd = new FormData();
-    fd.append('audio', blob, `recording.${ext}`);
-    const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({ detail: r.statusText }));
-      setStatus('Transcription failed: ' + (err.detail || r.status));
-      return;
-    }
-    const { transcript } = await r.json();
-    if (transcript) {
-      const cur = $('#user-input').value.trim();
-      $('#user-input').value = cur ? cur + ' ' + transcript : transcript;
-    }
+    const transcript = await postTranscribe(blob);
+    if (transcript) applyLiveTranscript(transcript);
     setStatus('');
   } catch (e) {
     setStatus('Transcription error: ' + e.message);
   } finally {
     $('#mic-btn').disabled = false;
   }
+}
+
+async function postTranscribe(blob, signal) {
+  const ext = blob.type.includes('webm') ? 'webm'
+            : blob.type.includes('ogg')  ? 'ogg'
+            : blob.type.includes('mp4')  ? 'm4a'
+            : 'webm';
+  const fd = new FormData();
+  fd.append('audio', blob, `recording.${ext}`);
+  const r = await fetch('/api/transcribe', { method: 'POST', body: fd, signal });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(err.detail || r.status);
+  }
+  const { transcript } = await r.json();
+  return (transcript || '').trim();
 }
 
 // --- Unified entry points used by the mic button handlers ---
