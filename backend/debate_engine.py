@@ -9,7 +9,6 @@ SendFn = Callable[[dict], Awaitable[None]]
 
 
 def _next_debater_index(session: Session) -> int:
-    """Round-robin through configured debater personalities."""
     debater_turns = [t for t in session.turns if t.speaker.startswith("debater_")]
     return len(debater_turns) % session.config.debater_count
 
@@ -24,7 +23,6 @@ async def _stream_agent(
     speaker: str,
     stream_iter,
 ) -> str:
-    """Stream tokens to client, accumulate full text, save turn."""
     await send({"type": "stream_start", "speaker": speaker})
     buf = []
     async for token in stream_iter:
@@ -46,15 +44,16 @@ async def _stream_agent(
 
 
 async def run_intro(session: Session, send: SendFn) -> None:
-    """Moderator opens, then first debater speaks."""
+    """Moderator opens. If there are debaters, first one gives opening argument."""
     await _stream_agent(session, send, "moderator", moderator.stream_open(session))
 
-    first_personality = session.config.debater_personalities[0]
-    speaker = f"debater_{first_personality}"
-    await _stream_agent(
-        session, send, speaker,
-        debater.stream_turn(session, first_personality, is_opening=True),
-    )
+    if session.config.debater_count > 0 and session.config.debater_personalities:
+        first_personality = session.config.debater_personalities[0]
+        speaker = f"debater_{first_personality}"
+        await _stream_agent(
+            session, send, speaker,
+            debater.stream_turn(session, first_personality, is_opening=True),
+        )
 
     await send({
         "type": "timer_start",
@@ -63,7 +62,7 @@ async def run_intro(session: Session, send: SendFn) -> None:
 
 
 async def handle_user_turn(session: Session, send: SendFn, content: str, input_method: str = "text") -> None:
-    """Receive user's submission, save it, run evaluator, then AI debater(s), then either continue or close."""
+    """Receive user's submission, evaluate, then either AI turn or closing."""
     if not content.strip():
         content = "[No response - speaker yielded the floor]"
 
@@ -77,7 +76,6 @@ async def handle_user_turn(session: Session, send: SendFn, content: str, input_m
     session_manager.save(session)
     await send({"type": "turn_saved", "turn": user_turn.model_dump()})
 
-    # Evaluator (non-streaming, just JSON)
     try:
         eval_result = await evaluator.evaluate(session, user_turn)
         session.evaluations.append(eval_result)
@@ -86,16 +84,15 @@ async def handle_user_turn(session: Session, send: SendFn, content: str, input_m
     except Exception as e:
         await send({"type": "error", "message": f"Evaluator failed: {e}"})
 
-    # Check if we hit max turns
     if _user_turn_count(session) >= session.config.max_turns:
         await run_closing(session, send)
         return
 
-    # Next AI turn (round-robin)
-    idx = _next_debater_index(session)
-    personality = session.config.debater_personalities[idx]
-    speaker = f"debater_{personality}"
-    await _stream_agent(session, send, speaker, debater.stream_turn(session, personality))
+    if session.config.debater_count > 0 and session.config.debater_personalities:
+        idx = _next_debater_index(session)
+        personality = session.config.debater_personalities[idx]
+        speaker = f"debater_{personality}"
+        await _stream_agent(session, send, speaker, debater.stream_turn(session, personality))
 
     await send({
         "type": "timer_start",
@@ -104,13 +101,17 @@ async def handle_user_turn(session: Session, send: SendFn, content: str, input_m
 
 
 async def run_closing(session: Session, send: SendFn) -> None:
-    """Moderator closes, then move to audience reveal."""
+    """Moderator closes. If audience configured, reveal their reactions; otherwise skip to analysis prompt."""
     await _stream_agent(session, send, "moderator", moderator.stream_close(session))
     session.status = "audience_reveal"
     session_manager.save(session)
-    await send({"type": "audience_reveal_start"})
 
-    # Gather audience reactions in parallel
+    if session.config.audience_count == 0:
+        await send({"type": "audience_reveal_start", "skipped": True})
+        return
+
+    await send({"type": "audience_reveal_start", "skipped": False})
+
     try:
         reactions = await audience.gather_reactions(session)
         session.audience_reactions = reactions

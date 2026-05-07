@@ -65,17 +65,19 @@
         <button class="choice active" data-val="60">60s</button>
         <button class="choice" data-val="90">90s</button>
         <button class="choice" data-val="120">2m</button>
+        <button class="choice" data-val="0">∞</button>
       </div>
     </div>
 
     <div class="field">
       <label>Max Turns <span id="max-turns-label" class="muted">6</span></label>
-      <input type="range" id="cfg-max-turns" min="3" max="10" value="6" />
+      <input type="range" id="cfg-max-turns" min="1" max="10" value="6" />
     </div>
 
     <div class="field">
       <label>Opponents</label>
       <div class="choices" data-key="debater_count" id="debater-count">
+        <button class="choice" data-val="0">NONE</button>
         <button class="choice" data-val="1">1</button>
         <button class="choice active" data-val="2">2</button>
         <button class="choice" data-val="3">3</button>
@@ -86,6 +88,8 @@
     <div class="field">
       <label>Audience</label>
       <div class="choices" data-key="audience_count" id="audience-count">
+        <button class="choice" data-val="0">NONE</button>
+        <button class="choice" data-val="1">1</button>
         <button class="choice" data-val="2">2</button>
         <button class="choice active" data-val="3">3</button>
       </div>

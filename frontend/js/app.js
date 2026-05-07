@@ -186,7 +186,7 @@ function renderDebaterSlots() {
   const wrap = $('#debater-slots');
   wrap.innerHTML = '';
   const count = state.config.debater_count;
-  // Ensure array length matches
+  if (count === 0) { state.config.debater_personalities = []; return; }
   const ids = Object.keys(DEBATERS);
   while (state.config.debater_personalities.length < count) {
     state.config.debater_personalities.push(ids[state.config.debater_personalities.length % ids.length]);
@@ -213,6 +213,7 @@ function renderAudienceSlots() {
   const wrap = $('#audience-slots');
   wrap.innerHTML = '';
   const count = state.config.audience_count;
+  if (count === 0) { state.config.audience_personas = []; return; }
   const ids = Object.keys(AUDIENCE);
   while (state.config.audience_personas.length < count) {
     state.config.audience_personas.push(ids[state.config.audience_personas.length % ids.length]);
@@ -274,32 +275,40 @@ function setupArena() {
   // Debater cards
   const cards = $('#debater-cards');
   cards.innerHTML = '';
-  state.config.debater_personalities.forEach((pid) => {
-    const p = DEBATERS[pid];
-    const div = document.createElement('div');
-    div.className = 'debater-card';
-    div.dataset.speaker = `debater_${pid}`;
-    div.innerHTML = `
-      <div class="name">${p.name}</div>
-      <div class="bar"></div>
-      <div class="body" data-role="body"></div>
-    `;
-    cards.appendChild(div);
-  });
+  if (state.config.debater_count === 0) {
+    cards.innerHTML = '<p class="muted" style="padding:12px 0;font-size:13px">No opponents — solo review mode.</p>';
+  } else {
+    state.config.debater_personalities.forEach((pid) => {
+      const p = DEBATERS[pid];
+      const div = document.createElement('div');
+      div.className = 'debater-card';
+      div.dataset.speaker = `debater_${pid}`;
+      div.innerHTML = `
+        <div class="name">${p.name}</div>
+        <div class="bar"></div>
+        <div class="body" data-role="body"></div>
+      `;
+      cards.appendChild(div);
+    });
+  }
 
   // Audience silhouettes
   const aud = $('#audience-list');
   aud.innerHTML = '';
-  state.config.audience_personas.forEach((pid) => {
-    const p = AUDIENCE[pid];
-    const div = document.createElement('div');
-    div.className = 'audience-item';
-    div.innerHTML = `
-      <div class="a-name">○ ${p.name}</div>
-      <div class="a-status">observing...</div>
-    `;
-    aud.appendChild(div);
-  });
+  if (state.config.audience_count === 0) {
+    aud.innerHTML = '<p class="muted" style="font-size:12px;padding:8px 0">No audience.</p>';
+  } else {
+    state.config.audience_personas.forEach((pid) => {
+      const p = AUDIENCE[pid];
+      const div = document.createElement('div');
+      div.className = 'audience-item';
+      div.innerHTML = `
+        <div class="a-name">○ ${p.name}</div>
+        <div class="a-status">observing...</div>
+      `;
+      aud.appendChild(div);
+    });
+  }
 
   // Transcript reset
   $('#transcript').innerHTML = '';
@@ -343,16 +352,29 @@ function handleMessage(msg) {
       showEvalCard(msg.evaluation);
       break;
     case 'timer_start':
-      // Wait for any in-flight TTS to finish before starting the timer.
       state.lastTTSPromise.then(() => {
-        startTimer(msg.seconds);
+        if (msg.seconds > 0) {
+          startTimer(msg.seconds);
+        } else {
+          // No time limit — just enable input, show infinity symbol.
+          stopTimer();
+          $('#timer-text').textContent = '∞';
+          $('#timer-fill').style.width = '100%';
+        }
         enableUserInput();
       });
       break;
     case 'audience_reveal_start':
       state.lastTTSPromise.then(() => {
         stopTimer();
-        showScreen('screen-reveal');
+        if (msg.skipped) {
+          // No audience configured — jump straight to the analysis prompt.
+          showScreen('screen-reveal');
+          $('#reveal-cards').innerHTML = '<p class="muted center" style="grid-column:1/-1;padding:32px 0">No audience configured for this session.</p>';
+          $('#tally').innerHTML = '';
+        } else {
+          showScreen('screen-reveal');
+        }
       });
       break;
     case 'audience_member_ready':
