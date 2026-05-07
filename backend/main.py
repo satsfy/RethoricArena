@@ -3,13 +3,13 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .models.schemas import SessionConfig
-from . import session_manager, debate_engine, llm_client
+from . import session_manager, debate_engine, llm_client, transcribe
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
@@ -35,12 +35,30 @@ async def index():
 
 @app.get("/api/config")
 async def app_config():
-    """Tells the frontend whether the server has its own API key.
-
-    If true, the frontend can skip the BYOK prompt. If false, the user must
-    supply a key for the session to work.
+    """Tells the frontend whether the server has its own API key, and whether
+    server-side voice transcription is available (for browsers that lack the
+    Web Speech API, like Firefox).
     """
-    return {"server_has_key": llm_client.server_has_key()}
+    return {
+        "server_has_key": llm_client.server_has_key(),
+        "transcription_available": transcribe.is_available(),
+    }
+
+
+@app.post("/api/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    if not transcribe.is_available():
+        raise HTTPException(status_code=503, detail="Server transcription is not configured.")
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty audio upload.")
+    try:
+        text = await transcribe.transcribe(data, filename=audio.filename or "recording.webm")
+    except transcribe.NoTranscriberError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
+    return {"transcript": text}
 
 
 @app.post("/session")

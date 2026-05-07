@@ -41,6 +41,8 @@ Coolify reads the `Dockerfile` in the repo root and handles the rest. One-time s
 2. **Build Pack:** Dockerfile (auto-detected). **Port:** `8678`. **Domain:** whatever you want.
 3. **Environment variables (optional):**
    - `DEEPSEEK_API_KEY` — if set, every visitor uses your key (the BYOK prompt is hidden). Leave it unset if you want each user to bring their own key.
+   - `GROQ_API_KEY` — if set, enables server-side voice transcription so Firefox users can use the mic. Groq has a free tier with whisper-large-v3-turbo. Get one at console.groq.com.
+   - `OPENAI_API_KEY` — alternative to Groq for transcription. Whisper costs ~$0.006/min.
 4. **Persistent storage (optional):** mount `/app/storage` if you want session JSON files to survive redeploys. Skip it if you don't care about saved transcripts.
 5. **Deploy.**
 
@@ -79,4 +81,9 @@ All run on `deepseek-chat`. Cost per session is roughly a few cents.
 
 ## Voice input
 
-Uses the browser-native Web Speech API. Chrome only. Hold the mic button, speak, release to populate the input box. Submit normally.
+Two paths, picked automatically per browser:
+
+- **Chrome / Edge:** uses the browser-native Web Speech API. Free, instant, runs entirely in the browser.
+- **Firefox / Safari / Brave-with-Google-blocked:** records audio with MediaRecorder, posts to `/api/transcribe`, server forwards to Whisper. Requires `GROQ_API_KEY` (free tier, recommended) or `OPENAI_API_KEY` to be set on the server.
+
+Hold the mic button, speak, release. Submit normally.

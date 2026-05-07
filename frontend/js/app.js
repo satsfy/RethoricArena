@@ -34,6 +34,11 @@ const state = {
   ws: null,
   apiKey: '',
   serverHasKey: false,
+  transcriptionAvailable: false,
+  voiceMode: null,           // 'speech_recognition' | 'media_recorder' | null
+  mediaRecorder: null,
+  recordingChunks: [],
+  recordingStream: null,
   currentSpeaker: null,
   liveBuffers: {},   // speaker -> string
   timer: null,
@@ -126,8 +131,10 @@ async function loadServerConfig() {
     const r = await fetch('/api/config');
     const data = await r.json();
     state.serverHasKey = !!data.server_has_key;
+    state.transcriptionAvailable = !!data.transcription_available;
   } catch {
     state.serverHasKey = false;
+    state.transcriptionAvailable = false;
   }
 
   if (!state.serverHasKey) {
@@ -538,7 +545,34 @@ function autoSubmit() {
   submitUserTurn(text || '[No response - speaker yielded the floor]', state.recognizing ? 'voice' : 'text');
 }
 
-// ---------- Voice (Web Speech API) ----------
+// ---------- Voice input ----------
+// Two paths:
+//   1) Browser Web Speech API (Chrome/Edge): live, free, browser-side.
+//   2) MediaRecorder + server-side Whisper (Firefox/anyone else):
+//      record blob, POST to /api/transcribe on release.
+//
+// We pick the first available path that actually works.
+
+function detectVoiceMode() {
+  const hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const hasMR = !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if (hasSR) return 'speech_recognition';
+  if (hasMR && state.transcriptionAvailable) return 'media_recorder';
+  return null;
+}
+
+function disableMic(reason) {
+  state.recognitionDisabled = true;
+  const mic = $('#mic-btn');
+  mic.disabled = true;
+  mic.style.opacity = 0.4;
+  if (reason) {
+    mic.title = reason;
+    setStatus(reason);
+  }
+}
+
+// --- Path 1: Web Speech API ---
 function setupSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
@@ -559,17 +593,15 @@ function setupSpeech() {
   };
   r.onerror = (e) => {
     if (e.error === 'network') {
-      setStatus('Voice input unavailable: browser blocked Google speech servers. Use Chrome, or enable Google services in Brave (brave://settings/privacy → Use Google services for push messaging). Falling back to text.');
-      state.recognitionDisabled = true;
-      const mic = $('#mic-btn');
-      mic.disabled = true;
-      mic.style.opacity = 0.4;
-      mic.title = 'Voice unavailable in this browser';
+      // Brave/Firefox-with-extension case: try the server fallback if available.
+      if (state.transcriptionAvailable && window.MediaRecorder) {
+        setStatus('Browser speech blocked, switching to server transcription.');
+        state.voiceMode = 'media_recorder';
+      } else {
+        disableMic('Voice input unavailable: browser blocked Google speech servers. Use Chrome, or have the host enable server transcription (GROQ_API_KEY).');
+      }
     } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      setStatus('Microphone permission denied. Use the text input instead.');
-      state.recognitionDisabled = true;
-      $('#mic-btn').disabled = true;
-      $('#mic-btn').style.opacity = 0.4;
+      disableMic('Microphone permission denied. Use the text input instead.');
     } else if (e.error === 'no-speech') {
       setStatus('No speech detected.');
     } else if (e.error !== 'aborted') {
@@ -585,25 +617,112 @@ function setupSpeech() {
   return r;
 }
 
+// --- Path 2: MediaRecorder + server-side Whisper ---
+async function startMediaRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    state.recordingStream = stream;
+    state.recordingChunks = [];
+    const candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/mp4',
+    ];
+    const mime = candidates.find((m) => window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    state.mediaRecorder = mr;
+    mr.ondataavailable = (e) => { if (e.data && e.data.size > 0) state.recordingChunks.push(e.data); };
+    mr.onstop = async () => {
+      try { stream.getTracks().forEach((t) => t.stop()); } catch {}
+      state.recordingStream = null;
+      const blob = new Blob(state.recordingChunks, { type: mr.mimeType || 'audio/webm' });
+      state.recordingChunks = [];
+      if (blob.size === 0) { setStatus(''); return; }
+      await sendForTranscription(blob);
+    };
+    mr.start();
+    state.recognizing = true;
+    $('#mic-btn').classList.add('recording');
+    setStatus('🎙️ Recording. Release to transcribe.');
+  } catch (err) {
+    if (err && err.name === 'NotAllowedError') {
+      disableMic('Microphone permission denied.');
+    } else {
+      setStatus('Mic unavailable: ' + (err && err.message || err));
+    }
+  }
+}
+
+function stopMediaRecording() {
+  state.recognizing = false;
+  $('#mic-btn').classList.remove('recording');
+  const mr = state.mediaRecorder;
+  if (mr && mr.state !== 'inactive') {
+    try { mr.stop(); } catch {}
+  }
+  if (state.recordingStream) {
+    try { state.recordingStream.getTracks().forEach((t) => t.stop()); } catch {}
+    state.recordingStream = null;
+  }
+}
+
+async function sendForTranscription(blob) {
+  setStatus('Transcribing...');
+  $('#mic-btn').disabled = true;
+  try {
+    const ext = blob.type.includes('webm') ? 'webm'
+              : blob.type.includes('ogg') ? 'ogg'
+              : blob.type.includes('mp4') ? 'm4a'
+              : 'webm';
+    const fd = new FormData();
+    fd.append('audio', blob, `recording.${ext}`);
+    const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: r.statusText }));
+      setStatus('Transcription failed: ' + (err.detail || r.status));
+      return;
+    }
+    const { transcript } = await r.json();
+    if (transcript) {
+      const cur = $('#user-input').value.trim();
+      $('#user-input').value = cur ? cur + ' ' + transcript : transcript;
+    }
+    setStatus('');
+  } catch (e) {
+    setStatus('Transcription error: ' + e.message);
+  } finally {
+    $('#mic-btn').disabled = false;
+  }
+}
+
+// --- Unified entry points used by the mic button handlers ---
 function startRecognition() {
   if (state.recognitionDisabled) return;
-  if (!state.recognition) state.recognition = setupSpeech();
-  if (!state.recognition) {
-    setStatus('Voice not supported in this browser. Use Chrome.');
-    state.recognitionDisabled = true;
-    $('#mic-btn').disabled = true;
-    $('#mic-btn').style.opacity = 0.4;
+  if (!state.voiceMode) state.voiceMode = detectVoiceMode();
+  if (!state.voiceMode) {
+    disableMic('Voice not supported here. The host can enable server transcription by setting GROQ_API_KEY.');
     return;
   }
-  state.recognizing = true;
-  $('#mic-btn').classList.add('recording');
-  try { state.recognition.start(); } catch {}
+  if (state.voiceMode === 'speech_recognition') {
+    if (!state.recognition) state.recognition = setupSpeech();
+    if (!state.recognition) { disableMic('Voice not supported in this browser.'); return; }
+    state.recognizing = true;
+    $('#mic-btn').classList.add('recording');
+    try { state.recognition.start(); } catch {}
+  } else if (state.voiceMode === 'media_recorder') {
+    startMediaRecording();
+  }
 }
 
 function stopRecognition() {
-  if (state.recognition) try { state.recognition.stop(); } catch {}
-  state.recognizing = false;
-  $('#mic-btn').classList.remove('recording');
+  if (state.voiceMode === 'speech_recognition') {
+    if (state.recognition) try { state.recognition.stop(); } catch {}
+    state.recognizing = false;
+    $('#mic-btn').classList.remove('recording');
+  } else if (state.voiceMode === 'media_recorder') {
+    stopMediaRecording();
+  }
 }
 
 // ---------- Evaluator card ----------
