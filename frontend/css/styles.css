@@ -127,6 +127,48 @@ textarea:focus, input:focus { outline: none; border-color: var(--amber); }
   font-family: var(--ui);
 }
 
+/* Motion topic suggestions */
+.motion-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.topic-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 5px 12px;
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.topic-chip:hover {
+  border-color: var(--amber);
+  color: var(--text);
+}
+.motion-browse {
+  margin-top: 8px;
+}
+.motion-browse select {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 7px 12px;
+  border-radius: 4px;
+  font-family: var(--ui);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  width: 100%;
+  max-width: 320px;
+}
+.motion-browse select:focus { outline: none; border-color: var(--amber); }
+
 input[type=range] { width: 100%; accent-color: var(--amber); }
 
 input[type=password] {

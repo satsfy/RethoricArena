@@ -1,5 +1,135 @@
 // RhetoricArena single-file frontend controller.
 
+// ---------- Debate topic bank ----------
+const TOPICS = [
+  // AI & Tech
+  { cat: 'AI & Tech', text: 'Claude is better than ChatGPT' },
+  { cat: 'AI & Tech', text: 'AI will take more jobs than it creates' },
+  { cat: 'AI & Tech', text: 'AI should replace human judges in criminal courts' },
+  { cat: 'AI & Tech', text: 'Social media does more harm than good' },
+  { cat: 'AI & Tech', text: 'Everyone should learn to code' },
+  { cat: 'AI & Tech', text: 'The internet has made us less intelligent' },
+  { cat: 'AI & Tech', text: 'Big Tech companies should be broken up' },
+  { cat: 'AI & Tech', text: 'Open-source AI is too dangerous to be unrestricted' },
+  { cat: 'AI & Tech', text: 'Smartphones have destroyed a generation' },
+  { cat: 'AI & Tech', text: 'Autonomous weapons should be banned' },
+  { cat: 'AI & Tech', text: 'Tech billionaires are good for humanity' },
+  { cat: 'AI & Tech', text: 'Crypto will replace traditional banking' },
+  { cat: 'AI & Tech', text: 'AI art is real art' },
+  { cat: 'AI & Tech', text: 'We are already living in a simulation' },
+  { cat: 'AI & Tech', text: 'Privacy is dead and we should accept it' },
+  // Politics & Society
+  { cat: 'Politics', text: 'Democracy is the worst system except for all the others' },
+  { cat: 'Politics', text: 'Voting should be mandatory' },
+  { cat: 'Politics', text: 'The two-party system is beyond repair' },
+  { cat: 'Politics', text: 'Open borders would be good for the world' },
+  { cat: 'Politics', text: 'Cancel culture has gone too far' },
+  { cat: 'Politics', text: 'Political correctness is destroying free speech' },
+  { cat: 'Politics', text: 'Universal basic income would do more harm than good' },
+  { cat: 'Politics', text: 'The UN is irrelevant in today\'s world' },
+  { cat: 'Politics', text: 'Term limits should be mandatory for all politicians' },
+  { cat: 'Politics', text: 'Nationalism is a greater threat than terrorism' },
+  { cat: 'Politics', text: 'Meritocracy is a myth' },
+  { cat: 'Politics', text: 'Affirmative action does more harm than good' },
+  { cat: 'Politics', text: 'The media is the enemy of the people' },
+  { cat: 'Politics', text: 'Whistleblowers should be protected, not prosecuted' },
+  { cat: 'Politics', text: 'Lobbying is legalised corruption' },
+  // Economics
+  { cat: 'Economics', text: 'Capitalism is the root cause of climate change' },
+  { cat: 'Economics', text: 'The 40-hour work week is obsolete' },
+  { cat: 'Economics', text: 'CEOs are paid too much' },
+  { cat: 'Economics', text: 'Free trade does more harm to developing nations than good' },
+  { cat: 'Economics', text: 'Billionaires should not exist' },
+  { cat: 'Economics', text: 'Automation will solve poverty' },
+  { cat: 'Economics', text: 'The housing market is broken beyond political repair' },
+  { cat: 'Economics', text: 'Student loan debt should be cancelled' },
+  { cat: 'Economics', text: 'The gig economy exploits workers' },
+  { cat: 'Economics', text: 'Inflation is always a political choice' },
+  { cat: 'Economics', text: 'Healthcare should be entirely publicly funded' },
+  { cat: 'Economics', text: 'A wealth tax would do more harm than good' },
+  // Ethics & Philosophy
+  { cat: 'Ethics', text: 'It is ethical to eat meat' },
+  { cat: 'Ethics', text: 'Euthanasia should be a universal right' },
+  { cat: 'Ethics', text: 'The death penalty is never justified' },
+  { cat: 'Ethics', text: 'We have a moral obligation to colonise Mars' },
+  { cat: 'Ethics', text: 'Lying is sometimes the most ethical choice' },
+  { cat: 'Ethics', text: 'Genetic enhancement of children should be legal' },
+  { cat: 'Ethics', text: 'Animals deserve the same rights as humans' },
+  { cat: 'Ethics', text: 'We owe more to future generations than to the present' },
+  { cat: 'Ethics', text: 'Effective altruism is a cult for the privileged' },
+  { cat: 'Ethics', text: 'It is morally wrong to have children in 2025' },
+  { cat: 'Ethics', text: 'Trolley problem: always pull the lever' },
+  { cat: 'Ethics', text: 'A world government would be better for humanity' },
+  // Science & Environment
+  { cat: 'Science', text: 'Nuclear power is essential to fighting climate change' },
+  { cat: 'Science', text: 'We are doing too little too late on climate change' },
+  { cat: 'Science', text: 'Geoengineering the climate is too risky to attempt' },
+  { cat: 'Science', text: 'Space colonisation should be a top global priority' },
+  { cat: 'Science', text: 'Veganism is the only ethical diet' },
+  { cat: 'Science', text: 'Lab-grown meat will save the planet' },
+  { cat: 'Science', text: 'We should resurrect extinct species' },
+  { cat: 'Science', text: 'Anti-vaccine sentiment is a bigger threat than any virus' },
+  { cat: 'Science', text: 'Psychedelics should be legalised for therapeutic use' },
+  { cat: 'Science', text: 'The singularity will happen within 30 years' },
+  // Culture & Media
+  { cat: 'Culture', text: 'Streaming has killed the movie theatre' },
+  { cat: 'Culture', text: 'Video games are a legitimate art form' },
+  { cat: 'Culture', text: 'Influencers are the celebrities of our generation' },
+  { cat: 'Culture', text: 'Pop music has gotten worse' },
+  { cat: 'Culture', text: 'Books are better than their film adaptations' },
+  { cat: 'Culture', text: 'Reality TV is genuinely harmful to society' },
+  { cat: 'Culture', text: 'The Marvel Cinematic Universe ruined cinema' },
+  { cat: 'Culture', text: 'Satire is more powerful than protest' },
+  { cat: 'Culture', text: 'Nostalgia is making culture worse' },
+  { cat: 'Culture', text: 'Comedy has no limits' },
+  { cat: 'Culture', text: 'Twitter/X has been bad for public discourse' },
+  { cat: 'Culture', text: 'Long-form journalism is dying and we should care' },
+  // Education
+  { cat: 'Education', text: 'University is no longer worth the cost' },
+  { cat: 'Education', text: 'Standardised testing is counterproductive' },
+  { cat: 'Education', text: 'Homework does more harm than good' },
+  { cat: 'Education', text: 'Philosophy should be taught in every school' },
+  { cat: 'Education', text: 'Elite universities perpetuate inequality' },
+  { cat: 'Education', text: 'We should teach negotiation, not just math' },
+  { cat: 'Education', text: 'Homeschooling is better than traditional schooling' },
+  { cat: 'Education', text: 'Critical thinking should be the core of every curriculum' },
+  // Health & Lifestyle
+  { cat: 'Health', text: 'Work-life balance is a lie sold to workers' },
+  { cat: 'Health', text: 'Mental health days should be a legal right' },
+  { cat: 'Health', text: 'Alcohol is more harmful to society than cannabis' },
+  { cat: 'Health', text: 'The wellness industry is mostly pseudoscience' },
+  { cat: 'Health', text: 'Running is overrated as exercise' },
+  { cat: 'Health', text: 'Intermittent fasting is a fad' },
+  { cat: 'Health', text: 'We are living through an epidemic of loneliness' },
+  { cat: 'Health', text: 'The 8-hour sleep rule is outdated' },
+  // Spicy / Fun
+  { cat: 'Spicy', text: 'Pineapple belongs on pizza' },
+  { cat: 'Spicy', text: 'Remote work is better than office work' },
+  { cat: 'Spicy', text: 'Coffee is overrated' },
+  { cat: 'Spicy', text: 'Cats are better pets than dogs' },
+  { cat: 'Spicy', text: 'Men have it harder than women in modern society' },
+  { cat: 'Spicy', text: 'Marriage is an outdated institution' },
+  { cat: 'Spicy', text: 'Monogamy is unnatural' },
+  { cat: 'Spicy', text: 'Introverts make better leaders' },
+  { cat: 'Spicy', text: 'Short meetings should replace emails' },
+  { cat: 'Spicy', text: 'Morning people are more productive — or just more annoying' },
+  { cat: 'Spicy', text: 'Adults should have a bedtime' },
+  { cat: 'Spicy', text: 'Luck matters more than skill in career success' },
+  { cat: 'Spicy', text: 'The friend zone does not exist' },
+  { cat: 'Spicy', text: 'Hot takes are good for public discourse' },
+  { cat: 'Spicy', text: 'Hustle culture is a mental illness' },
+];
+
+// 3 featured topics shown as quick-pick chips (shuffled each load)
+const FEATURED_TOPICS = (() => {
+  const pool = TOPICS.filter(t => [
+    'Claude is better than ChatGPT',
+    'Billionaires should not exist',
+    'Remote work is better than office work',
+  ].includes(t.text));
+  return pool;
+})();
+
 // ---------- Persona metadata mirrored from backend ----------
 const DEBATERS = {
   rigorous: { name: 'The Academic', desc: 'Cites studies, demands definitions, surgical precision.' },
@@ -290,6 +420,48 @@ function syncConfigUI() {
   $('#max-turns-label').textContent = state.config.max_turns;
 }
 
+function setMotion(text) {
+  state.config.motion = text;
+  $('#cfg-motion').value = text;
+  saveConfig();
+  validate();
+}
+
+function initTopicPicker() {
+  // Featured chips
+  const suggestionsEl = $('#motion-suggestions');
+  FEATURED_TOPICS.forEach((t) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'topic-chip';
+    btn.textContent = t.text;
+    btn.addEventListener('click', () => setMotion(t.text));
+    suggestionsEl.appendChild(btn);
+  });
+
+  // Group picker by category
+  const picker = $('#motion-picker');
+  const cats = [...new Set(TOPICS.map(t => t.cat))];
+  cats.forEach((cat) => {
+    const group = document.createElement('optgroup');
+    group.label = cat;
+    TOPICS.filter(t => t.cat === cat).forEach((t) => {
+      const opt = document.createElement('option');
+      opt.value = t.text;
+      opt.textContent = t.text;
+      group.appendChild(opt);
+    });
+    picker.appendChild(group);
+  });
+
+  picker.addEventListener('change', () => {
+    if (picker.value) {
+      setMotion(picker.value);
+      picker.value = '';  // reset so same item can be re-selected
+    }
+  });
+}
+
 function initConfig() {
   // Choice button groups
   $$('.choices').forEach((group) => {
@@ -325,6 +497,7 @@ function initConfig() {
   syncConfigUI();
   renderDebaterSlots();
   renderAudienceSlots();
+  initTopicPicker();
   validate();
 
   $('#enter-arena').addEventListener('click', enterArena);
