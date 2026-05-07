@@ -99,8 +99,8 @@
     <div class="field">
       <label>Input Method</label>
       <div class="choices" data-key="input_method">
-        <button class="choice active" data-val="text">⌨️ TEXT</button>
-        <button class="choice" data-val="voice">🎤 VOICE</button>
+        <button class="choice" data-val="text">⌨️ TEXT</button>
+        <button class="choice active" data-val="voice">🎤 VOICE</button>
       </div>
     </div>
 
@@ -138,10 +138,11 @@
     <div class="input-label">YOUR TURN</div>
     <textarea id="user-input" rows="3" placeholder="Type your response, or hold the mic..."></textarea>
     <div class="input-controls">
-      <button id="mic-btn" class="btn-mic">🎤 HOLD TO SPEAK</button>
+      <button id="mic-btn" class="btn-mic">🎤 MIC</button>
       <button id="submit-btn" class="btn-primary small">SUBMIT</button>
       <button id="tts-skip" class="btn-ghost hidden">⏭ SKIP TTS</button>
       <button id="tts-toggle" class="btn-ghost" title="Cycle TTS: OpenAI / Native / Off">🔊 TTS</button>
+      <button id="tts-speed" class="btn-ghost" title="Cycle playback speed">⏩ 1x</button>
       <div class="timer-wrap">
         <div class="timer-text" id="timer-text">--:--</div>
         <div class="timer-bar"><div id="timer-fill"></div></div>

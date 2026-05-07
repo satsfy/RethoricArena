@@ -17,19 +17,35 @@ const AUDIENCE = {
 };
 
 // ---------- State ----------
+const CONFIG_STORAGE = 'rhetoricarena.config';
+const DEFAULT_CONFIG = {
+  motion: '',
+  user_position: 'against',
+  difficulty: 'standard',
+  time_per_turn_seconds: 60,
+  max_turns: 6,
+  debater_count: 2,
+  debater_personalities: ['rigorous', 'socratic'],
+  audience_count: 3,
+  audience_personas: ['academic', 'undecided_voter', 'policy_wonk'],
+  input_method: 'voice',
+};
+function loadSavedConfig() {
+  try {
+    const raw = localStorage.getItem(CONFIG_STORAGE);
+    if (!raw) return { ...DEFAULT_CONFIG };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+function saveConfig() {
+  try { localStorage.setItem(CONFIG_STORAGE, JSON.stringify(state.config)); } catch {}
+}
+
 const state = {
-  config: {
-    motion: '',
-    user_position: 'against',
-    difficulty: 'standard',
-    time_per_turn_seconds: 60,
-    max_turns: 6,
-    debater_count: 2,
-    debater_personalities: ['rigorous', 'socratic'],
-    audience_count: 3,
-    audience_personas: ['academic', 'undecided_voter', 'policy_wonk'],
-    input_method: 'text',
-  },
+  config: loadSavedConfig(),
   sessionId: null,
   ws: null,
   apiKey: '',
@@ -61,8 +77,11 @@ const state = {
 // of latency before audio starts; native is instant but voices are mediocre
 // (especially on Firefox). Mode persists in localStorage.
 const TTS_STORAGE = 'rhetoricarena.tts_mode';
+const TTS_SPEED_STORAGE = 'rhetoricarena.tts_speed';
+const SPEED_STEPS = [1, 1.25, 1.5, 1.75, 2];
 const tts = {
   mode: localStorage.getItem(TTS_STORAGE) || 'server',  // 'server' | 'browser' | 'off'
+  speed: parseFloat(localStorage.getItem(TTS_SPEED_STORAGE)) || 1,
   voices: [],
   voiceMap: {},
   current: null,           // current SpeechSynthesisUtterance
@@ -128,6 +147,20 @@ function cycleTTSMode() {
   applyTTSMode();
 }
 
+function applySpeedUI() {
+  const btn = document.getElementById('tts-speed');
+  if (btn) btn.textContent = `⏩ ${tts.speed}x`;
+}
+
+function cycleSpeed() {
+  const i = SPEED_STEPS.indexOf(tts.speed);
+  tts.speed = SPEED_STEPS[(i + 1) % SPEED_STEPS.length];
+  localStorage.setItem(TTS_SPEED_STORAGE, String(tts.speed));
+  // Apply live to anything currently playing.
+  if (tts.currentAudio) tts.currentAudio.playbackRate = tts.speed;
+  applySpeedUI();
+}
+
 function speakViaBrowser(speakerId, text) {
   return new Promise((resolve) => {
     if (!window.speechSynthesis) { resolve(); return; }
@@ -135,7 +168,7 @@ function speakViaBrowser(speakerId, text) {
     const u = new SpeechSynthesisUtterance(text);
     const v = pickVoice(speakerId);
     if (v) u.voice = v;
-    u.rate = 1.05;
+    u.rate = Math.min(2, 1.05 * tts.speed);
     u.pitch = speakerId.startsWith('debater_') ? 0.95 : 1.0;
     let done = false;
     const finish = () => { if (done) return; done = true; tts.current = null; resolve(); };
@@ -157,6 +190,7 @@ async function speakViaServer(speakerId, text) {
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   audio.preload = 'auto';
+  audio.playbackRate = tts.speed;
   tts.currentAudio = audio;
   tts.currentAudioUrl = url;
   return new Promise((resolve) => {
@@ -241,6 +275,21 @@ async function loadServerConfig() {
 }
 
 // ---------- Config screen wiring ----------
+function syncConfigUI() {
+  // Reflect saved state.config values into the choice buttons, motion field, slider.
+  $$('.choices').forEach((group) => {
+    const key = group.dataset.key;
+    const val = state.config[key];
+    if (val === undefined || val === null) return;
+    group.querySelectorAll('.choice').forEach((b) => {
+      b.classList.toggle('active', String(b.dataset.val) === String(val));
+    });
+  });
+  if (state.config.motion) $('#cfg-motion').value = state.config.motion;
+  $('#cfg-max-turns').value = state.config.max_turns;
+  $('#max-turns-label').textContent = state.config.max_turns;
+}
+
 function initConfig() {
   // Choice button groups
   $$('.choices').forEach((group) => {
@@ -255,12 +304,14 @@ function initConfig() {
       state.config[key] = val;
       if (key === 'debater_count') renderDebaterSlots();
       if (key === 'audience_count') renderAudienceSlots();
+      saveConfig();
       validate();
     });
   });
 
   $('#cfg-motion').addEventListener('input', (e) => {
     state.config.motion = e.target.value.trim();
+    saveConfig();
     validate();
   });
 
@@ -268,8 +319,10 @@ function initConfig() {
   turnsSlider.addEventListener('input', (e) => {
     state.config.max_turns = parseInt(e.target.value);
     $('#max-turns-label').textContent = e.target.value;
+    saveConfig();
   });
 
+  syncConfigUI();
   renderDebaterSlots();
   renderAudienceSlots();
   validate();
@@ -299,6 +352,7 @@ function renderDebaterSlots() {
     });
     sel.addEventListener('change', (e) => {
       state.config.debater_personalities[i] = e.target.value;
+      saveConfig();
     });
     wrap.appendChild(sel);
   }
@@ -326,6 +380,7 @@ function renderAudienceSlots() {
     });
     sel.addEventListener('change', (e) => {
       state.config.audience_personas[i] = e.target.value;
+      saveConfig();
     });
     wrap.appendChild(sel);
   }
@@ -611,6 +666,9 @@ function enableUserInput() {
   $('#user-input').focus();
   $('#submit-btn').disabled = false;
   $('#mic-btn').disabled = false;
+  if (state.config.input_method === 'voice' && !state.recognizing && !state.recognitionDisabled) {
+    startRecognition();
+  }
 }
 function disableUserInput() {
   state.awaitingUser = false;
@@ -619,13 +677,32 @@ function disableUserInput() {
   $('#mic-btn').disabled = true;
 }
 
-function submitUserTurn(content, inputMethod = 'text') {
+async function submitUserTurn(content, inputMethod = 'text') {
   if (!state.awaitingUser) return;
-  if (state.recognizing) stopRecognition();
+  // If recording via the server-side path, await the final transcription
+  // so we don't submit before the final transcript replaces the live one.
+  if (state.recognizing && state.voiceMode === 'media_recorder') {
+    await stopRecognitionAndWait();
+    content = $('#user-input').value.trim() || content;
+  } else if (state.recognizing) {
+    stopRecognition();
+  }
   stopTimer();
   disableUserInput();
   state.ws.send(JSON.stringify({ type: 'user_turn', content, input_method: inputMethod }));
   $('#user-input').value = '';
+}
+
+function stopRecognitionAndWait() {
+  return new Promise((resolve) => {
+    const mr = state.mediaRecorder;
+    if (!mr || mr.state === 'inactive') { stopRecognition(); resolve(); return; }
+    const original = mr.onstop;
+    mr.onstop = async (ev) => {
+      try { if (original) await original.call(mr, ev); } finally { resolve(); }
+    };
+    stopRecognition();
+  });
 }
 
 function autoSubmit() {
@@ -1028,6 +1105,7 @@ function bindButtons() {
   });
 
   $('#tts-toggle').addEventListener('click', cycleTTSMode);
+  $('#tts-speed').addEventListener('click', cycleSpeed);
 
   $('#user-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -1068,12 +1146,12 @@ function bindButtons() {
     a.click();
   });
 
-  // Mic press-and-hold OR toggle
+  // Mic: click to toggle on/off.
   const mic = $('#mic-btn');
-  mic.addEventListener('mousedown', () => { if (!state.recognizing) startRecognition(); });
-  mic.addEventListener('mouseup', () => { if (state.recognizing) stopRecognition(); });
-  mic.addEventListener('mouseleave', () => { if (state.recognizing) stopRecognition(); });
-  mic.addEventListener('click', (e) => { e.preventDefault(); }); // prevent toggle behavior conflicts
+  mic.addEventListener('click', () => {
+    if (state.recognizing) stopRecognition();
+    else startRecognition();
+  });
 }
 
 // ---------- Init ----------
@@ -1084,4 +1162,5 @@ bindButtons();
 loadServerConfig().then(() => {
   validate();
   applyTTSMode();
+  applySpeedUI();
 });
