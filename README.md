@@ -4,7 +4,7 @@ Sharpen your arguments against AI opponents that fight back. RhetoricArena puts 
 
 Pick any motion, choose your opponents, and step into the arena.
 
-![Debate setup screen](docs/assets/image%20copy%202.png)
+![Debate setup screen](docs/assets/image%20copy%203.png)
 
 Two AI debaters argue their side out loud via TTS. When it's your turn, hold the mic and make your case — you have 60 seconds. No notes, no retakes.
 
