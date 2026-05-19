@@ -26,9 +26,22 @@ async def stream_open(session: Session) -> AsyncIterator[str]:
     sys = _system(session)
     max_tokens = _OPEN_TOKENS.get(session.config.response_length, _OPEN_TOKENS["short"])
     sentences = "1-2 sentences" if session.config.response_length == "short" else "2-3 sentences"
+    cfg = session.config
+    # The AI debater speaks first when present; otherwise the human opens.
+    if cfg.debater_count > 0 and cfg.debater_personalities:
+        invite = (
+            "An AI debater will speak first, opposing the human's position. "
+            "End by inviting that AI debater to deliver the opening argument. "
+            "Do not refer to the human speaking first."
+        )
+    else:
+        invite = (
+            "There are no AI opponents in this session. "
+            "End by inviting the human debater to deliver their opening statement."
+        )
     user_msg = (
         f"Open the debate. Introduce the motion crisply and set the stage. "
-        f"Then invite the first AI debater to speak. {sentences} max."
+        f"{invite} {sentences} max."
     )
     async for chunk in llm_client.stream_completion(sys, [{"role": "user", "content": user_msg}], temperature=0.7, max_tokens=max_tokens):
         yield chunk

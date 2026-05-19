@@ -55,6 +55,7 @@ class Evaluation(BaseModel):
 class AudienceReaction(BaseModel):
     persona_id: str
     name: str
+    verdict: str = ""           # in-character 3-5 sentence monologue, primary display
     first_impression: str = ""
     turning_point: str = ""
     what_won_you_over: str = ""

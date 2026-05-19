@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
 from .models.schemas import SessionConfig
@@ -16,6 +17,18 @@ FRONTEND = ROOT / "frontend"
 
 app = FastAPI(title="RhetoricArena")
 
+
+class NoStaticCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/") or request.url.path == "/":
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+
+app.add_middleware(NoStaticCacheMiddleware)
 app.mount("/static", StaticFiles(directory=str(FRONTEND)), name="static")
 
 # In-memory: session_id -> user-supplied DeepSeek API key.
