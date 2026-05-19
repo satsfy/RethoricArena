@@ -792,8 +792,13 @@ function handleMessage(msg) {
       });
       break;
     case 'audience_reveal_start':
+      // The debate is over. Kill the timer AND the mic the moment the closing
+      // ends so the recording indicator doesn't keep running into the verdict.
+      stopTimer();
+      disableUserInput();
       _enqueueAfterTTS(() => {
         stopTimer();
+        disableUserInput();
         if (msg.skipped) {
           // No audience configured — jump straight to the analysis prompt.
           showScreen('screen-reveal');
@@ -989,6 +994,13 @@ function disableUserInput() {
 
 async function submitUserTurn(content, inputMethod = 'text') {
   if (!state.awaitingUser) return;
+  // Close the race window IMMEDIATELY. submitUserTurn is async and the
+  // media_recorder branch awaits before the WS send. Without flipping
+  // awaitingUser here, a timer expiry or a duplicate click landing during
+  // the await passes the guard and triggers a second user_turn with the
+  // same content, which the backend then processes as a real second turn.
+  state.awaitingUser = false;
+  stopTimer();
   // If recording via the server-side path, await the final transcription
   // so we don't submit before the final transcript replaces the live one.
   if (state.recognizing && state.voiceMode === 'media_recorder') {
@@ -997,7 +1009,6 @@ async function submitUserTurn(content, inputMethod = 'text') {
   } else if (state.recognizing) {
     stopRecognition();
   }
-  stopTimer();
   disableUserInput();
   state.ws.send(JSON.stringify({ type: 'user_turn', content, input_method: inputMethod }));
   $('#user-input').value = '';
