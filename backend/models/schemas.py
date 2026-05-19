@@ -37,6 +37,9 @@ class Turn(BaseModel):
     turn_number: int
     speaker: str
     content: str
+    # Debater "scratchpad": the model's private setup notes for this turn.
+    # Present only for debater turns; the UI may reveal it on demand.
+    scratch: Optional[str] = None
     timestamp: str = Field(default_factory=_now)
     metadata: TurnMetadata = Field(default_factory=TurnMetadata)
 

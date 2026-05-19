@@ -35,6 +35,7 @@ const TOPICS = [
   { cat: 'Politics', text: 'Whistleblowers should be protected, not prosecuted' },
   { cat: 'Politics', text: 'Lobbying is legalised corruption' },
   // Economics
+  { cat: 'Economics', text: 'Bitcoin is superior to altcoins' },
   { cat: 'Economics', text: 'Capitalism is the root cause of climate change' },
   { cat: 'Economics', text: 'The 40-hour work week is obsolete' },
   { cat: 'Economics', text: 'CEOs are paid too much' },
@@ -123,20 +124,23 @@ const TOPICS = [
 // 3 featured topics shown as quick-pick chips (shuffled each load)
 const FEATURED_TOPICS = (() => {
   const pool = TOPICS.filter(t => [
-    'Claude is better than ChatGPT',
-    'Billionaires should not exist',
-    'Remote work is better than office work',
+    'A world government would be better for humanity',
+    'Bitcoin is superior to altcoins',
+    'Privacy is dead and we should accept it',
   ].includes(t.text));
   return pool;
 })();
 
 // ---------- Persona metadata mirrored from backend ----------
 const DEBATERS = {
-  rigorous: { name: 'The Academic', desc: 'Cites studies, demands definitions, surgical precision.' },
-  populist: { name: 'The Firebrand', desc: 'Emotional appeals, vivid language, rhetorical heat.' },
-  socratic: { name: 'The Questioner', desc: 'Only questions. Each one is a trap.' },
-  pragmatist: { name: 'The Realist', desc: '"That sounds nice in theory, but in practice..."' },
-  devil: { name: 'The Contrarian', desc: 'Hunts the buried assumption in everything.' },
+  rigorous:    { name: 'The Academic',     desc: 'Definitions, hidden premises, surgical dissection.' },
+  populist:    { name: 'The Firebrand',    desc: 'Gut, stakes, moral heat in plain language.' },
+  socratic:    { name: 'The Questioner',   desc: 'Probes. One sharp question, never formulaic.' },
+  pragmatist:  { name: 'The Realist',      desc: 'Mechanisms, costs, who bears the downside.' },
+  devil:       { name: 'The Contrarian',   desc: 'Surfaces the assumption you didn\'t argue for.' },
+  historian:   { name: 'The Historian',    desc: 'Cites precedent, then strikes.' },
+  steelman:    { name: 'The Steelman',     desc: 'Restates your case at its strongest, then breaks it.' },
+  storyteller: { name: 'The Storyteller',  desc: 'One real case. The story IS the argument.' },
 };
 const AUDIENCE = {
   academic: { name: 'Prof. Chen', desc: 'Logical rigor and evidence.' },
@@ -160,6 +164,7 @@ const DEFAULT_CONFIG = {
   audience_personas: ['academic', 'undecided_voter', 'policy_wonk'],
   input_method: 'voice',
   response_length: 'short',
+  show_scratch: 'off',
 };
 function loadSavedConfig() {
   try {
@@ -192,7 +197,8 @@ const state = {
   liveTranscribeTimer: null,
   liveTranscribeAbort: null,
   currentSpeaker: null,
-  liveBuffers: {},   // speaker -> string
+  liveBuffers: {},   // speaker -> string (speech only, for non-analyst speakers)
+  liveScratch: {},   // debater speaker -> string (the setup/thinking portion)
   timer: null,
   timerSecondsLeft: 0,
   awaitingUser: false,
@@ -201,6 +207,9 @@ const state = {
   recognitionDisabled: false,
   evalQueue: [],
   lastTTSPromise: Promise.resolve(),
+  turns: [],                 // every saved turn (user + AI) in arrival order
+  evaluations: [],           // per-user-turn evaluator output, parallel to user turns
+  audienceReactions: [],     // final-screen audience verdicts
 };
 
 // ---------- TTS (server OpenAI, browser SpeechSynthesis, off) ----------
@@ -634,17 +643,23 @@ function setupArena() {
   // Debater cards
   const cards = $('#debater-cards');
   cards.innerHTML = '';
+  const showScratch = state.config.show_scratch === 'on';
+  cards.classList.toggle('show-scratch', showScratch);
   if (state.config.debater_count === 0) {
     cards.innerHTML = '<p class="muted" style="padding:12px 0;font-size:13px">No opponents — solo review mode.</p>';
   } else {
     state.config.debater_personalities.forEach((pid) => {
-      const p = DEBATERS[pid];
+      const p = DEBATERS[pid] || { name: pid, desc: '' };
       const div = document.createElement('div');
       div.className = 'debater-card';
       div.dataset.speaker = `debater_${pid}`;
       div.innerHTML = `
         <div class="name">${p.name}</div>
         <div class="bar"></div>
+        <div class="scratch-block">
+          <div class="scratch-label">SETUP · private thinking</div>
+          <div class="scratch" data-role="scratch"></div>
+        </div>
         <div class="body" data-role="body"></div>
       `;
       cards.appendChild(div);
@@ -690,9 +705,11 @@ function connectWebSocket() {
   ws.onopen = () => setStatus('Connected. The moderator is preparing...');
 }
 
-// Buffer for stream messages that arrive while TTS is still playing.
-// Each entry is an array of {type,speaker,token?} for one complete speaker turn.
-// Flushed in order once lastTTSPromise resolves.
+// Buffer for stream messages and post-stream actions that must wait for TTS.
+// Each entry is either an array of {type,speaker,token?} (one speaker turn) or
+// a function (a deferred action like timer_start / audience_reveal_start).
+// Items are flushed strictly in arrival order, each waiting for the in-flight
+// TTS promise to resolve before running.
 const _streamQueue = [];
 let _streamQueueFlushing = false;
 
@@ -701,17 +718,28 @@ function _enqueueStreamGroup(msgs) {
   _flushStreamQueue();
 }
 
+function _enqueueAfterTTS(fn) {
+  _streamQueue.push(fn);
+  _flushStreamQueue();
+}
+
 function _flushStreamQueue() {
   if (_streamQueueFlushing) return;
   _streamQueueFlushing = true;
   (function next() {
     if (!_streamQueue.length) { _streamQueueFlushing = false; return; }
+    // Read lastTTSPromise lazily so we always chain on the most recently
+    // assigned promise (a prior stream_end may have just replaced it).
     state.lastTTSPromise.then(() => {
-      const group = _streamQueue.shift();
-      for (const m of group) {
-        if (m.type === 'stream_start') onStreamStart(m.speaker);
-        else if (m.type === 'stream_token') onStreamToken(m.speaker, m.token);
-        else if (m.type === 'stream_end') onStreamEnd(m.speaker);
+      const item = _streamQueue.shift();
+      if (typeof item === 'function') {
+        item();
+      } else {
+        for (const m of item) {
+          if (m.type === 'stream_start') onStreamStart(m.speaker);
+          else if (m.type === 'stream_token') onStreamToken(m.speaker, m.token, m.part);
+          else if (m.type === 'stream_end') onStreamEnd(m.speaker);
+        }
       }
       // onStreamEnd sets a new lastTTSPromise; loop after it resolves
       next();
@@ -733,7 +761,7 @@ function handleMessage(msg) {
       break;
     case 'stream_token':
       if (msg.speaker === 'analyst') { onStreamToken(msg.speaker, msg.token); break; }
-      if (_incomingGroup) _incomingGroup.push({ type: 'stream_token', speaker: msg.speaker, token: msg.token });
+      if (_incomingGroup) _incomingGroup.push({ type: 'stream_token', speaker: msg.speaker, token: msg.token, part: msg.part });
       break;
     case 'stream_end':
       if (msg.speaker === 'analyst') { onStreamEnd(msg.speaker); break; }
@@ -747,10 +775,11 @@ function handleMessage(msg) {
       onTurnSaved(msg.turn);
       break;
     case 'eval_complete':
+      state.evaluations.push(msg.evaluation);
       showEvalCard(msg.evaluation);
       break;
     case 'timer_start':
-      state.lastTTSPromise.then(() => {
+      _enqueueAfterTTS(() => {
         if (msg.seconds > 0) {
           startTimer(msg.seconds);
         } else {
@@ -763,7 +792,7 @@ function handleMessage(msg) {
       });
       break;
     case 'audience_reveal_start':
-      state.lastTTSPromise.then(() => {
+      _enqueueAfterTTS(() => {
         stopTimer();
         if (msg.skipped) {
           // No audience configured — jump straight to the analysis prompt.
@@ -776,6 +805,7 @@ function handleMessage(msg) {
       });
       break;
     case 'audience_member_ready':
+      state.audienceReactions.push(msg.reaction);
       addRevealCard(msg.reaction);
       break;
     case 'analysis_complete':
@@ -794,6 +824,7 @@ function setStatus(s) { $('#status-line').textContent = s; }
 function onStreamStart(speaker) {
   state.currentSpeaker = speaker;
   state.liveBuffers[speaker] = '';
+  state.liveScratch[speaker] = '';
 
   if (speaker.startsWith('debater_')) {
     const card = document.querySelector(`.debater-card[data-speaker="${speaker}"]`);
@@ -801,6 +832,8 @@ function onStreamStart(speaker) {
       $$('.debater-card').forEach((c) => c.classList.remove('speaking'));
       card.classList.add('speaking');
       card.querySelector('[data-role=body]').textContent = '';
+      const scratchEl = card.querySelector('[data-role=scratch]');
+      if (scratchEl) scratchEl.textContent = '';
     }
   }
   if (speaker === 'analyst') {
@@ -810,7 +843,23 @@ function onStreamStart(speaker) {
   setStatus(`${speakerLabel(speaker)} is speaking...`);
 }
 
-function onStreamToken(speaker, token) {
+function onStreamToken(speaker, token, part) {
+  // For debaters, the backend tags each token with part='scratch' or 'speech'.
+  // Scratch goes to a separate panel and is never spoken; speech accumulates
+  // into liveBuffers exactly like before so the existing TTS path is unchanged.
+  if (speaker.startsWith('debater_') && part === 'scratch') {
+    state.liveScratch[speaker] = (state.liveScratch[speaker] || '') + token;
+    const card = document.querySelector(`.debater-card[data-speaker="${speaker}"]`);
+    if (card) {
+      const scratchEl = card.querySelector('[data-role=scratch]');
+      if (scratchEl) {
+        scratchEl.textContent = state.liveScratch[speaker];
+        scratchEl.scrollTop = scratchEl.scrollHeight;
+      }
+    }
+    return;
+  }
+
   state.liveBuffers[speaker] = (state.liveBuffers[speaker] || '') + token;
   if (speaker.startsWith('debater_')) {
     const card = document.querySelector(`.debater-card[data-speaker="${speaker}"]`);
@@ -855,6 +904,7 @@ function showTTSControls(playing, speaker) {
 }
 
 function onTurnSaved(turn) {
+  state.turns.push(turn);
   appendTranscript(turn);
   // Update turn counter (count user turns)
   if (turn.speaker === 'user') {
@@ -910,6 +960,9 @@ function updateTimerUI(left, total) {
 // ---------- User input ----------
 function enableUserInput() {
   state.awaitingUser = true;
+  // Clear any residue from the prior turn (post-stop recognition tail,
+  // stale paste, etc.) so autoSubmit can't fire stale text on this turn.
+  $('#user-input').value = '';
   $('#user-input').disabled = false;
   $('#user-input').focus();
   $('#submit-btn').disabled = false;
@@ -923,6 +976,15 @@ function disableUserInput() {
   $('#user-input').disabled = true;
   $('#submit-btn').disabled = true;
   $('#mic-btn').disabled = true;
+  // Ensure no recording continues outside the user's turn. Live transcribe
+  // requests must not fire while the AI is speaking — they waste API quota
+  // and trigger rate-limit / 400 errors mid-session.
+  if (state.recognizing) {
+    try { stopRecognition(); } catch {}
+  }
+  // Clear the textbox so the previous turn's content never lingers visibly
+  // while the AI is responding.
+  $('#user-input').value = '';
 }
 
 async function submitUserTurn(content, inputMethod = 'text') {
@@ -995,6 +1057,12 @@ function setupSpeech() {
   r.lang = 'en-US';
   let finalText = '';
   r.onresult = (e) => {
+    // Web Speech API's stop() is async: after we've already submitted the turn
+    // and called stopRecognition(), Chrome may still fire one final onresult
+    // with the rest of the buffered audio. If we honor that write, it lands in
+    // the input field and gets re-submitted by autoSubmit on the next turn's
+    // timer expiry. Gate on state.recognizing so post-stop tails are dropped.
+    if (!state.recognizing) return;
     let interim = '';
     finalText = '';
     for (let i = 0; i < e.results.length; i++) {
@@ -1038,7 +1106,7 @@ function setupSpeech() {
 // replaces the live portion of the input. On stop, one final transcription
 // runs against the complete audio for highest accuracy.
 
-const LIVE_INTERVAL_MS = 1800;
+const LIVE_INTERVAL_MS = 2000;
 
 async function startMediaRecording() {
   try {
@@ -1103,7 +1171,15 @@ function startLiveTranscribeLoop() {
   let inFlight = false;
   state.liveTranscribeTimer = setInterval(async () => {
     if (inFlight) return;
-    if (!state.recordingChunks.length) return;
+    if (!state.recognizing) return;   // guard against late ticks after stop
+    if (state.recordingChunks.length < 2) return;   // need at least header + 1 cluster
+
+    // Approximate total size; skip until we have a non-trivial buffer so the
+    // server transcriber doesn't reject a near-empty webm fragment.
+    let totalBytes = 0;
+    for (const c of state.recordingChunks) totalBytes += c.size;
+    if (totalBytes < 4096) return;
+
     inFlight = true;
 
     // Abort any earlier still-pending request.
@@ -1136,6 +1212,11 @@ function stopLiveTranscribeLoop() {
 }
 
 function applyLiveTranscript(transcript) {
+  // Refuse to write into the textbox if it's no longer the user's turn.
+  // A live-transcribe or final-transcribe response can resolve after the
+  // user has already submitted, and writing here would leave stale content
+  // visible while the AI is responding.
+  if (!state.awaitingUser) return;
   const pre = state.preRecordingText;
   $('#user-input').value = pre ? pre + ' ' + transcript : transcript;
 }
@@ -1245,19 +1326,24 @@ function addRevealCard(reaction) {
   const wrap = $('#reveal-cards');
   const div = document.createElement('div');
   div.className = 'reveal-card';
-  const personaName = AUDIENCE[reaction.persona_id]?.name || reaction.name;
   const personaDesc = AUDIENCE[reaction.persona_id]?.desc || '';
   div.innerHTML = `
-    <div class="rc-name">${reaction.name}</div>
-    <div class="rc-persona">${personaDesc}</div>
-    <div class="rc-quote"></div>
+    <div class="rc-name">${escapeHtml(reaction.name)}</div>
+    <div class="rc-persona">${escapeHtml(personaDesc)}</div>
+    <div class="rc-verdict"></div>
     <div class="rc-vote ${reaction.vote}">${reaction.vote.toUpperCase()}</div>
   `;
   wrap.appendChild(div);
   setTimeout(() => div.classList.add('show'), wrap.children.length * 600);
-  // Typewriter for the message
-  const msg = reaction.message_to_speaker || reaction.what_won_you_over || reaction.first_impression;
-  setTimeout(() => typewriter(div.querySelector('.rc-quote'), msg), wrap.children.length * 600 + 400);
+  // Typewriter the verdict monologue. Fall back to older fields if backend
+  // hasn't been redeployed yet.
+  const msg = reaction.verdict
+    || reaction.message_to_speaker
+    || reaction.vote_reasoning
+    || reaction.what_won_you_over
+    || reaction.first_impression
+    || '';
+  setTimeout(() => typewriter(div.querySelector('.rc-verdict'), msg), wrap.children.length * 600 + 400);
 
   updateTally();
 }
@@ -1279,13 +1365,17 @@ function updateTally() {
 }
 
 function typewriter(el, text) {
+  // Reveal in chunks so a long monologue lands in ~2-3 seconds total,
+  // not a tedious 7+ second single-char crawl.
   let i = 0;
   el.textContent = '';
+  const total = text.length;
+  const step = Math.max(2, Math.ceil(total / 120));
   const interval = setInterval(() => {
-    el.textContent += text[i] || '';
-    i++;
-    if (i >= text.length) clearInterval(interval);
-  }, 18);
+    i += step;
+    el.textContent = text.slice(0, i);
+    if (i >= total) { el.textContent = text; clearInterval(interval); }
+  }, 22);
 }
 
 // ---------- Markdown rendering (lightweight) ----------
@@ -1338,6 +1428,95 @@ function finalizeReport(md) {
   $('#report-body').innerHTML = renderMarkdown(md);
 }
 
+function buildFullDebateMarkdown() {
+  const cfg = state.config;
+  const out = [];
+  out.push(`# RhetoricArena debate log`);
+  out.push('');
+  out.push(`**Motion:** ${cfg.motion}`);
+  out.push(`**Your position:** ${cfg.user_position}`);
+  out.push(`**Difficulty:** ${cfg.difficulty}`);
+  out.push(`**Time per turn:** ${cfg.time_per_turn_seconds === 0 ? 'unlimited' : cfg.time_per_turn_seconds + 's'}`);
+  out.push(`**Max turns:** ${cfg.max_turns}`);
+  out.push(`**Response length:** ${cfg.response_length}`);
+  if (cfg.debater_count > 0) {
+    const names = cfg.debater_personalities.map(pid => `${DEBATERS[pid]?.name || pid} (${pid})`).join(', ');
+    out.push(`**Opponents:** ${names}`);
+  } else {
+    out.push(`**Opponents:** none (solo review)`);
+  }
+  if (cfg.audience_count > 0) {
+    const names = cfg.audience_personas.map(pid => `${AUDIENCE[pid]?.name || pid} (${pid})`).join(', ');
+    out.push(`**Audience:** ${names}`);
+  } else {
+    out.push(`**Audience:** none`);
+  }
+  out.push(`**Saved at:** ${new Date().toISOString()}`);
+  out.push('');
+  out.push('---');
+  out.push('');
+  out.push('## Transcript');
+  out.push('');
+
+  const evalByTurnId = {};
+  for (const ev of state.evaluations) evalByTurnId[ev.turn_id] = ev;
+
+  for (const t of state.turns) {
+    out.push(`### Turn ${t.turn_number} — ${speakerLabel(t.speaker)}`);
+    if (t.metadata) {
+      const bits = [];
+      if (t.metadata.input_method) bits.push(`input: ${t.metadata.input_method}`);
+      if (t.metadata.word_count) bits.push(`${t.metadata.word_count} words`);
+      if (bits.length) out.push(`*${bits.join(' · ')}*`);
+    }
+    out.push('');
+    out.push(t.content || '');
+    out.push('');
+    const ev = evalByTurnId[t.id];
+    if (ev) {
+      out.push(`**Evaluator feedback** — structure ${ev.structure_score}/10 · logic ${ev.logic_score}/10 · rhetoric ${ev.rhetoric_score}/10`);
+      if (ev.highlight)    out.push(`- Highlight: ${ev.highlight}`);
+      if (ev.blind_spot)   out.push(`- Blind spot: ${ev.blind_spot}`);
+      if (ev.tip)          out.push(`- Tip: ${ev.tip}`);
+      if (ev.flair_moment) out.push(`- Flair: "${ev.flair_moment}"`);
+      out.push('');
+    }
+  }
+
+  if (state.audienceReactions.length) {
+    out.push('---');
+    out.push('');
+    out.push('## Audience verdicts');
+    out.push('');
+    for (const r of state.audienceReactions) {
+      out.push(`### ${r.name} — vote: ${r.vote.toUpperCase()}`);
+      if (r.verdict) {
+        out.push('');
+        out.push(`> ${r.verdict.replace(/\n/g, '\n> ')}`);
+        out.push('');
+      }
+      if (r.first_impression)    out.push(`- First impression: ${r.first_impression}`);
+      if (r.turning_point)       out.push(`- Turning point: ${r.turning_point}`);
+      if (r.what_won_you_over)   out.push(`- What won you over: ${r.what_won_you_over}`);
+      if (r.vote_reasoning)      out.push(`- Vote reasoning: ${r.vote_reasoning}`);
+      if (r.message_to_speaker)  out.push(`- Message to speaker: ${r.message_to_speaker}`);
+      out.push('');
+    }
+  }
+
+  const report = state.liveBuffers.analyst || '';
+  if (report.trim()) {
+    out.push('---');
+    out.push('');
+    out.push('## Post-debate analysis');
+    out.push('');
+    out.push(report);
+    out.push('');
+  }
+
+  return out.join('\n');
+}
+
 // ---------- Buttons ----------
 function bindButtons() {
   $('#submit-btn').addEventListener('click', () => {
@@ -1384,7 +1563,7 @@ function bindButtons() {
   });
 
   $('#save-report').addEventListener('click', () => {
-    const md = state.liveBuffers.analyst || '';
+    const md = buildFullDebateMarkdown();
     const slug = state.config.motion.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
     const date = new Date().toISOString().slice(0, 10);
     const blob = new Blob([md], { type: 'text/markdown' });

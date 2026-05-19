@@ -79,6 +79,14 @@ body {
   }
 }
 .field { margin-bottom: 20px; }
+.field-hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.85;
+  margin-top: 6px;
+  line-height: 1.45;
+}
 .field label {
   display: block;
   font-family: var(--ui);
@@ -336,6 +344,33 @@ input[type=password]:focus { outline: none; border-color: var(--amber); }
   max-height: 200px;
   overflow-y: auto;
 }
+/* The setup ("scratch") panel is the model's private thinking. Hidden by
+   default; revealed when the user enables "Show AI Thinking" on config. */
+.debater-card .scratch-block { display: none; }
+.debater-cards.show-scratch .debater-card .scratch-block { display: block; margin-bottom: 10px; }
+.debater-card .scratch-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--muted, #888);
+  opacity: 0.7;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.debater-card .scratch {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-style: italic;
+  opacity: 0.72;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  white-space: pre-wrap;
+}
+.debater-card .scratch:empty { display: none; }
 .dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--amber); margin-right: 6px;

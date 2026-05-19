@@ -23,6 +23,7 @@ async def _stream_agent(
     speaker: str,
     stream_iter,
 ) -> str:
+    """Stream a single-part agent (moderator, analyst) as plain text tokens."""
     await send({"type": "stream_start", "speaker": speaker})
     buf = []
     async for token in stream_iter:
@@ -43,6 +44,56 @@ async def _stream_agent(
     return full
 
 
+async def _stream_debater(
+    session: Session,
+    send: SendFn,
+    speaker: str,
+    stream_iter,
+) -> str:
+    """Stream a debater turn that emits (part, text) tuples.
+
+    The 'scratch' part is the model's setup/thinking; only the 'speech' part
+    is meant to be displayed in the arena and spoken aloud. Both are sent to
+    the client (tagged with `part`) and both are persisted on the turn so the
+    UI can choose to reveal the scratchpad after the fact.
+    """
+    await send({"type": "stream_start", "speaker": speaker})
+    scratch_buf: list[str] = []
+    speech_buf: list[str] = []
+    async for part, text in stream_iter:
+        if part == "scratch":
+            scratch_buf.append(text)
+        else:
+            speech_buf.append(text)
+        await send({
+            "type": "stream_token",
+            "speaker": speaker,
+            "token": text,
+            "part": part,
+        })
+    await send({"type": "stream_end", "speaker": speaker})
+
+    speech = "".join(speech_buf).strip()
+    scratch = "".join(scratch_buf).strip() or None
+    # Defensive: if the model never emitted the marker, treat everything as
+    # speech so the user still hears something.
+    if not speech and scratch:
+        speech = scratch
+        scratch = None
+
+    turn = Turn(
+        turn_number=len(session.turns) + 1,
+        speaker=speaker,
+        content=speech,
+        scratch=scratch,
+        metadata=TurnMetadata(input_method="text", word_count=len(speech.split())),
+    )
+    session.turns.append(turn)
+    session_manager.save(session)
+    await send({"type": "turn_saved", "turn": turn.model_dump()})
+    return speech
+
+
 async def run_intro(session: Session, send: SendFn) -> None:
     """Moderator opens. If there are debaters, first one gives opening argument."""
     await _stream_agent(session, send, "moderator", moderator.stream_open(session))
@@ -50,7 +101,7 @@ async def run_intro(session: Session, send: SendFn) -> None:
     if session.config.debater_count > 0 and session.config.debater_personalities:
         first_personality = session.config.debater_personalities[0]
         speaker = f"debater_{first_personality}"
-        await _stream_agent(
+        await _stream_debater(
             session, send, speaker,
             debater.stream_turn(session, first_personality, is_opening=True),
         )
@@ -92,7 +143,7 @@ async def handle_user_turn(session: Session, send: SendFn, content: str, input_m
         idx = _next_debater_index(session)
         personality = session.config.debater_personalities[idx]
         speaker = f"debater_{personality}"
-        await _stream_agent(session, send, speaker, debater.stream_turn(session, personality))
+        await _stream_debater(session, send, speaker, debater.stream_turn(session, personality))
 
     await send({
         "type": "timer_start",
